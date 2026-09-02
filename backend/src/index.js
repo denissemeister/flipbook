@@ -1,0 +1,58 @@
+require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
+
+const express      = require('express');
+const cors         = require('cors');
+const cookieParser = require('cookie-parser');
+const path         = require('path');
+
+const authRoutes        = require('./routes/auth');
+const booksRoutes       = require('./routes/books');
+const pagesRoutes       = require('./routes/pages');
+const elementsRoutes    = require('./routes/elements');
+const mediaRoutes       = require('./routes/media');
+const fontsRoutes       = require('./routes/fonts');
+const publicRoutes      = require('./routes/public');
+const customerAuthRoutes = require('./routes/customerAuth');
+const ordersRoutes       = require('./routes/orders');
+const recordingsRoutes   = require('./routes/recordings');
+
+const app  = express();
+const PORT = process.env.PORT || 3000;
+
+// ── Middleware ────────────────────────────────────────────────────────────────
+app.use(cors({
+  origin:      process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+  credentials: true,
+}));
+app.use(express.json());
+app.use(cookieParser());
+
+// Serve uploaded files (dev mode)
+const STORAGE_PATH = process.env.STORAGE_PATH || './uploads';
+app.use('/uploads', express.static(path.resolve(STORAGE_PATH)));
+
+// ── API routes ────────────────────────────────────────────────────────────────
+app.use('/api/v1/auth',              authRoutes);
+app.use('/api/v1/public',            publicRoutes);
+app.use('/api/v1/customer/auth',     customerAuthRoutes);  // before /api/v1 catch-alls
+app.use('/api/v1/customer/orders',      ordersRoutes);
+app.use('/api/v1/customer/recordings',  recordingsRoutes);
+app.use('/api/v1/books',             booksRoutes);
+app.use('/api/v1',                   pagesRoutes);
+app.use('/api/v1',                   elementsRoutes);
+app.use('/api/v1/media',             mediaRoutes);
+app.use('/api/v1/fonts',             fontsRoutes);
+
+// ── Health check ──────────────────────────────────────────────────────────────
+app.get('/health', (req, res) => res.json({ ok: true }));
+
+// ── Global error handler ──────────────────────────────────────────────────────
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+app.listen(PORT, () => {
+  console.log(`🚀  Flipbook API running on http://localhost:${PORT}`);
+});

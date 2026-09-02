@@ -1,0 +1,25 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: flipbook
+      POSTGRES_PASSWORD: flipbook_dev
+      POSTGRES_DB: flipbook
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flipbook"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+volumes:
+  pgdata:
+  uploads:
+
+
