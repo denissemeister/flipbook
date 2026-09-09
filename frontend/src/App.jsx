@@ -15,6 +15,10 @@ import PersonalizePage from './pages/PersonalizePage';
 import SettingsPage from './pages/SettingsPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import StorePage from './pages/StorePage';
+import CartPage from './pages/CartPage';
+import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
+import AdminProductsPage from './pages/AdminProductsPage';
 
 function PrivateRoute({ children }) {
   const token = useAuthStore(s => s.token);
@@ -70,12 +74,22 @@ export default function App() {
         <Route path="/read/:slug/aloud" element={<ReadAloudReaderPage />} />
         <Route path="/view/:slug" element={<ViewerPage />} />
 
+        {/* Store — public */}
+        <Route path="/store" element={<StorePage />} />
+        <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
+
+        {/* Store — customer auth */}
+        <Route path="/store/cart" element={<CustomerRoute><CartPage /></CustomerRoute>} />
+
         {/* Customer routes */}
         <Route path="/account/login" element={<CustomerLoginPage />} />
         <Route path="/account/orders" element={<CustomerRoute><OrdersPage /></CustomerRoute>} />
         <Route path="/personalize/:orderItemId/:slug" element={<CustomerRoute><PersonalizePage /></CustomerRoute>} />
 
-        <Route path="*" element={<Navigate to="/admin" replace />} />
+        {/* Admin store management */}
+        <Route path="/admin/store" element={<PrivateRoute><AdminProductsPage /></PrivateRoute>} />
+
+        <Route path="*" element={<Navigate to="/store" replace />} />
       </Routes>
     </BrowserRouter>
   );

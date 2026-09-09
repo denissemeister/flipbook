@@ -15,6 +15,10 @@ const publicRoutes      = require('./routes/public');
 const customerAuthRoutes = require('./routes/customerAuth');
 const ordersRoutes       = require('./routes/orders');
 const recordingsRoutes   = require('./routes/recordings');
+const storeRoutes        = require('./routes/store');
+const cartRoutes         = require('./routes/cart');
+const checkoutRoutes     = require('./routes/checkout');
+const adminProductRoutes = require('./routes/adminProducts');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -24,6 +28,10 @@ app.use(cors({
   origin:      process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   credentials: true,
 }));
+
+// Stripe webhook must receive the raw body — register BEFORE express.json()
+app.use('/api/v1/store/webhook', express.raw({ type: 'application/json' }));
+
 app.use(express.json());
 app.use(cookieParser());
 
@@ -42,6 +50,10 @@ app.use('/api/v1',                   pagesRoutes);
 app.use('/api/v1',                   elementsRoutes);
 app.use('/api/v1/media',             mediaRoutes);
 app.use('/api/v1/fonts',             fontsRoutes);
+app.use('/api/v1/store',             storeRoutes);
+app.use('/api/v1/store',             checkoutRoutes);
+app.use('/api/v1/store/cart',        cartRoutes);
+app.use('/api/v1/admin',             adminProductRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ ok: true }));
