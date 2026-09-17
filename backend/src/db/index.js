@@ -1,10 +1,10 @@
 const { Pool } = require('pg');
 
 const dbUrl = process.env.DATABASE_URL || '';
-console.log('DB connecting to host:', dbUrl ? new URL(dbUrl).hostname : 'NOT SET');
+console.log('DATABASE_URL set:', !!dbUrl, '| starts with:', dbUrl.slice(0, 20));
 
 const pool = new Pool({
-  connectionString: dbUrl,
+  connectionString: dbUrl || undefined,
   ssl: dbUrl.includes('railway') ? { rejectUnauthorized: false } : false,
 });
 
