@@ -2,7 +2,6 @@ const { Pool } = require('pg');
 
 // PG_URL takes priority — use this in Railway to avoid auto-reference conversion
 const dbUrl = process.env.PG_URL || process.env.DATABASE_URL || '';
-console.log('DB URL starts with:', dbUrl.slice(0, 30));
 
 const pool = new Pool({
   connectionString: dbUrl || undefined,
