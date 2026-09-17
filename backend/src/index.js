@@ -1,4 +1,6 @@
-require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
+// Load .env only in local dev — Railway injects env vars directly, so we use
+// `override: false` to prevent .env from overwriting Railway's variables.
+require('dotenv').config({ path: require('path').join(__dirname, '../../.env'), override: false });
 
 const express      = require('express');
 const cors         = require('cors');
