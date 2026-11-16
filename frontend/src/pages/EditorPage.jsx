@@ -436,22 +436,19 @@ export default function EditorPage() {
   }
 
   function pasteEls() {
-    if (!activePage || !clipboardEls.current.length) return;
-    const pageId = activePage.id;
-    pushUndo(pageId, 'Paste');
-    const OFFSET = 0.02;
-    const newEls = clipboardEls.current.map(src => ({
-      ...src,
-      id: 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2),
-      _new: true,
-      col_start: Math.min(1 - src.col_span, src.col_start + OFFSET),
-      row_start: Math.min(1 - src.row_span, src.row_start + OFFSET),
-    }));
-    updateElements(pageId, [...(elements[pageId] || []), ...newEls]);
-    setSelectedIds(new Set(newEls.map(el => el.id)));
-    const n = newEls.length;
-    showToast(`📋 ${n} element${n > 1 ? 's' : ''} pasted`);
-  }
+  if (!activePage || !clipboardEls.current.length) return;
+  const pageId = activePage.id;
+  pushUndo(pageId, 'Paste');
+  const newEls = clipboardEls.current.map(src => ({
+    ...src,
+    id: 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+    _new: true,
+  }));
+  updateElements(pageId, [...(elements[pageId] || []), ...newEls]);
+  setSelectedIds(new Set(newEls.map(el => el.id)));
+  const n = newEls.length;
+  showToast(`📋 ${n} element${n > 1 ? 's' : ''} pasted`);
+}
 
   // ── Drag from sidebar onto canvas ─────────────────────────────────────────
   const ghostRef = useRef(null);
