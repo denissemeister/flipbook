@@ -92,24 +92,27 @@ function ElementContent({ el }) {
   }
 
   if (el.type === 'text') {
-    if (!p.content) return null;
-    return (
-      <div style={{
-        width:'100%', height:'100%', padding:'8px 10px', overflow:'hidden', boxSizing:'border-box',
-        fontFamily: `'${p.fontFamily || 'Inter'}', sans-serif`,
-        fontSize: (p.fontSize || 18) + 'px',
-        color: p.color || '#222',
-        textAlign: p.align || 'left',
-        fontWeight: p.bold ? 'bold' : 'normal',
-        fontStyle: p.italic ? 'italic' : 'normal',
-        textDecoration: p.underline ? 'underline' : 'none',
-        lineHeight: p.lineHeight || 1.4,
-        letterSpacing: (p.letterSpacing || 0) + 'px',
-        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-      }}>
-        {p.content}
-      </div>
-    );
+    const hasRich = p.richText && p.richText.trim() !== '';
+    if (!hasRich && !p.content) return null;
+    const textStyle = {
+      width:'100%', height:'100%', padding:'8px 10px', overflow:'hidden', boxSizing:'border-box',
+      fontFamily: `'${p.fontFamily || 'Inter'}', sans-serif`,
+      fontSize: (p.fontSize || 18) + 'px',
+      color: p.color || '#222',
+      textAlign: p.align || 'left',
+      fontWeight: p.bold ? 'bold' : 'normal',
+      fontStyle: p.italic ? 'italic' : 'normal',
+      textDecoration: p.underline ? 'underline' : 'none',
+      lineHeight: p.lineHeight || 1.4,
+      letterSpacing: (p.letterSpacing || 0) + 'px',
+      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+    };
+    // richText is HTML produced by RichTextEditor (inline spans with per-word styles).
+    // Render it with dangerouslySetInnerHTML — only admin-authored content reaches here.
+    if (hasRich) {
+      return <div style={textStyle} dangerouslySetInnerHTML={{ __html: p.richText }} />;
+    }
+    return <div style={textStyle}>{p.content}</div>;
   }
 
   if (el.type === 'video') {
