@@ -662,7 +662,37 @@ export default function EditorPage() {
           onClick={() => navigate('/admin')}
         >◈</div>
         <span style={{ color: 'var(--muted)', fontSize: 12 }}>›</span>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>{book?.title || '…'}</span>
+        {editingTitle ? (
+  <input
+    autoFocus
+    defaultValue={book?.title || ''}
+    onBlur={async (e) => {
+      const newTitle = e.target.value.trim();
+      setEditingTitle(false);
+      if (newTitle && newTitle !== book?.title) {
+        await api.patch(`/books/${id}`, { title: newTitle });
+        setBook(b => ({ ...b, title: newTitle }));
+      }
+    }}
+    onKeyDown={e => {
+      if (e.key === 'Enter') e.target.blur();
+      if (e.key === 'Escape') { setEditingTitle(false); }
+    }}
+    style={{
+      fontSize: 13, fontWeight: 600, background: 'transparent',
+      border: 'none', borderBottom: '1px solid var(--accent)',
+      outline: 'none', color: 'var(--text)', width: 180,
+    }}
+  />
+) : (
+  <span
+    title="Click to rename"
+    onClick={() => setEditingTitle(true)}
+    style={{ fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+  >
+    {book?.title || '…'}
+  </span>
+)}
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: saveColor }}>{saveLabel}</span>
         <button
