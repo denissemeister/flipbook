@@ -1639,31 +1639,30 @@ function ElementContent({ el }) {
   }
 
   if (type === 'text') {
-    const txt = p.content || '';
-    if (!txt) return (
-      <div style={{ width:'100%', height:'100%', padding:'8px 10px', display:'flex', flexDirection:'column', gap:5, justifyContent:'center' }}>
-        {['85%','100%','70%'].map((w,i) => <div key={i} style={{ height:8, background:'#1e1e2e', borderRadius:2, width:w }} />)}
-      </div>
-    );
-    return (
-      <div style={{
-        width:'100%', height:'100%', padding:'8px 10px', overflow:'hidden',
-        fontFamily: `'${p.fontFamily||'Inter'}',sans-serif`,
-        fontSize: (p.fontSize||18) + 'px',
-        color: p.color || '#222',
-        textAlign: p.align || 'left',
-        fontWeight: p.bold ? 'bold' : 'normal',
-        fontStyle: p.italic ? 'italic' : 'normal',
-        textDecoration: p.underline ? 'underline' : 'none',
-        lineHeight: p.lineHeight || 1.4,
-        letterSpacing: (p.letterSpacing||0) + 'px',
-        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-        boxSizing: 'border-box',
-      }}>
-        {txt}
-      </div>
-    );
-  }
+  const hasRich = p.richText && p.richText.trim() !== '';
+  const txt = p.content || '';
+  if (!hasRich && !txt) return (
+    <div style={{ width:'100%', height:'100%', padding:'8px 10px', display:'flex', flexDirection:'column', gap:5, justifyContent:'center' }}>
+      {['85%','100%','70%'].map((w,i) => <div key={i} style={{ height:8, background:'#1e1e2e', borderRadius:2, width:w }} />)}
+    </div>
+  );
+  const textStyle = {
+    width:'100%', height:'100%', padding:'8px 10px', overflow:'hidden',
+    fontFamily: `'${p.fontFamily||'Inter'}',sans-serif`,
+    fontSize: (p.fontSize||18) + 'px',
+    color: p.color || '#222',
+    textAlign: p.align || 'left',
+    fontWeight: p.bold ? 'bold' : 'normal',
+    fontStyle: p.italic ? 'italic' : 'normal',
+    textDecoration: p.underline ? 'underline' : 'none',
+    lineHeight: p.lineHeight || 1.4,
+    letterSpacing: (p.letterSpacing||0) + 'px',
+    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+    boxSizing: 'border-box',
+  };
+  if (hasRich) return <div style={textStyle} dangerouslySetInnerHTML={{ __html: p.richText }} />;
+  return <div style={textStyle}>{txt}</div>;
+}
 
   if (type === 'video') return p.src
     ? <video src={p.src} style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} muted loop autoPlay />
