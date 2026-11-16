@@ -1566,23 +1566,25 @@ function CanvasElement({ el, selected, isEditing, onSelect, onStartEdit, onStopE
       )}
 
       {/* Inline text editor — transparent/in-place */}
-      {isTextEditing && (
-        <textarea
-          autoFocus
-          value={editingText}
-          onChange={e => setEditingText(e.target.value)}
-          onBlur={() => {
-            // Save via ref so we always have the latest value regardless of closure age
-            onChangeRef.current({ props: { ...pRef.current, content: editingTextRef.current } });
-            onStopEdit?.();
-          }}
-          onKeyDown={e => {
-            e.stopPropagation(); // prevent canvas shortcuts while typing
-            if (e.key === 'Escape') {
-              onChangeRef.current({ props: { ...pRef.current, content: editingTextRef.current } });
-              onStopEdit?.();
-            }
-          }}
+     {isTextEditing && (
+  <RichTextEditor
+    html={p.richText || p.content || ''}
+    baseStyle={{
+      fontFamily: `'${p.fontFamily || 'Inter'}', sans-serif`,
+      fontSize: (p.fontSize || 18) + 'px',
+      color: p.color || '#222',
+      textAlign: p.align || 'left',
+      fontWeight: p.bold ? 'bold' : 'normal',
+      fontStyle: p.italic ? 'italic' : 'normal',
+      textDecoration: p.underline ? 'underline' : 'none',
+      lineHeight: p.lineHeight || 1.4,
+      letterSpacing: (p.letterSpacing || 0) + 'px',
+    }}
+    onChange={(html) => {
+      onChangeRef.current({ props: { ...pRef.current, richText: html } });
+    }}
+  />
+)}
           onPointerDown={e => e.stopPropagation()}
           onClick={e => e.stopPropagation()}
           style={{
