@@ -1,4 +1,4 @@
-
+import RichTextEditor from '../components/RichTextEditor';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
