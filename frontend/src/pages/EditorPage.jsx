@@ -119,6 +119,7 @@ export default function EditorPage() {
   const clipboardEls = useRef([]); // copied elements array
   const saveTimer    = useRef(null);
   const canvasRef    = useRef(null);
+  const [editingTitle, setEditingTitle] = useState(false);
 
   // ── Load book ──────────────────────────────────────────────────────────────
   useEffect(() => {
