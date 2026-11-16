@@ -1585,28 +1585,6 @@ function CanvasElement({ el, selected, isEditing, onSelect, onStartEdit, onStopE
     }}
   />
 )}
-          onPointerDown={e => e.stopPropagation()}
-          onClick={e => e.stopPropagation()}
-          style={{
-            position: 'absolute', inset: 0, zIndex: 20,
-            background: 'transparent',
-            border: '2px solid var(--accent)', outline: 'none', resize: 'none',
-            padding: '6px 8px', boxSizing: 'border-box',
-            fontFamily: `'${p.fontFamily || 'Inter'}', sans-serif`,
-            fontSize: (p.fontSize || 18) + 'px',
-            color: p.color || '#222',
-            textAlign: p.align || 'left',
-            fontWeight: p.bold ? 'bold' : 'normal',
-            fontStyle: p.italic ? 'italic' : 'normal',
-            textDecoration: p.underline ? 'underline' : 'none',
-            lineHeight: p.lineHeight || 1.4,
-            letterSpacing: (p.letterSpacing || 0) + 'px',
-            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-            caretColor: p.color || '#222',
-          }}
-        />
-      )}
-
       {/* Inline link editor */}
       {isEditing && el.type === 'link' && (
         <LinkEditOverlay p={p} onChange={onChange} onStopEdit={onStopEdit} />
