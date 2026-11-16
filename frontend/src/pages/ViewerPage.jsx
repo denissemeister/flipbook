@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { loadGoogleFont, loadCustomFont, resolveFormat } from './EditorPage';
 
@@ -58,9 +58,7 @@ function CurveTextViewer({ el }) {
           <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}
             style={{ position:'absolute', inset:0, overflow:'visible' }}
           >
-            <defs>
-              <path id={pathId} d={d} />
-            </defs>
+            <defs><path id={pathId} d={d} /></defs>
             <text
               fontFamily={`'${p.fontFamily||'Inter'}', sans-serif`}
               fontSize={p.fontSize||20}
@@ -80,6 +78,7 @@ function CurveTextViewer({ el }) {
   );
 }
 
+// ── Element renderer ──────────────────────────────────────────────────────────
 function ElementContent({ el }) {
   const p = el.props || {};
 
@@ -146,39 +145,60 @@ function ElementContent({ el }) {
   return null;
 }
 
+// ── Page renderer ─────────────────────────────────────────────────────────────
+function PageCanvas({ page, fmt }) {
+  if (!page) return <div style={{ width: fmt.w, height: fmt.h, background: '#111' }} />;
+  return (
+    <div style={{ width: fmt.w, height: fmt.h, background: '#fff', position: 'relative', overflow: 'hidden', flexShrink: 0 }}>
+      {(page.elements || [])
+        .sort((a, b) => (a.layer * 100 + a.z_index) - (b.layer * 100 + b.z_index))
+        .map(el => (
+          <div key={el.id} style={elStyle(el)}>
+            <ElementContent el={el} />
+          </div>
+        ))}
+    </div>
+  );
+}
+
 // ── Main viewer ───────────────────────────────────────────────────────────────
 export default function ViewerPage() {
-  const { slug } = useParams();
-  const [book,    setBook]    = useState(null);
-  const [pages,   setPages]   = useState([]);
-  const [current, setCurrent] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState('');
-  const [transitioning, setTransitioning] = useState(false);
-  const [direction,     setDirection]     = useState(null);
-  const [showUI,  setShowUI]  = useState(true);
-  const [vpSize,  setVpSize]  = useState({ w: window.innerWidth, h: window.innerHeight });
-  const uiTimer = useRef(null);
+  const { slug }   = useParams();
+  const [book,     setBook]    = useState(null);
+  const [pages,    setPages]   = useState([]);
+  const [current,  setCurrent] = useState(0);
+  const [loading,  setLoading] = useState(true);
+  const [error,    setError]   = useState('');
+  const [showUI,   setShowUI]  = useState(true);
+  const [vpSize,   setVpSize]  = useState({ w: window.innerWidth, h: window.innerHeight });
 
-  const touchStartX = useRef(null);
-  const touchStartY = useRef(null);
+  // ── Swipe / drag state ────────────────────────────────────────────────────
+  // dragFrac: live finger offset as fraction of canvas width (-1 to 1)
+  // animating: true while CSS spring is running to snap into place
+  const [dragFrac,   setDragFrac]   = useState(0);
+  const [animating,  setAnimating]  = useState(false);
+  const dragStartX   = useRef(null);
+  const dragStartY   = useRef(null);
+  const dragAxis     = useRef(null); // 'h' | 'v' | null
 
-  // Track viewport size for scale calculation
+  const uiTimer      = useRef(null);
+  const animTimer    = useRef(null);
+
+  // Track viewport
   useEffect(() => {
     function onResize() { setVpSize({ w: window.innerWidth, h: window.innerHeight }); }
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  // Load book
   useEffect(() => {
     fetch(`/api/v1/public/books/${slug}`)
       .then(r => r.ok ? r.json() : Promise.reject(new Error('Book not found')))
       .then(data => {
         setBook(data);
         setPages(data.pages || []);
-        // Pre-load custom uploaded fonts
         (data.custom_fonts || []).forEach(f => loadCustomFont(f.family, f.url));
-        // Pre-load Google Fonts used in text and curvetext elements
         (data.pages || []).forEach(pg =>
           (pg.elements || []).forEach(el => {
             if ((el.type === 'text' || el.type === 'curvetext') && el.props?.fontFamily)
@@ -190,58 +210,117 @@ export default function ViewerPage() {
       .finally(() => setLoading(false));
   }, [slug]);
 
-  // Auto-hide UI after 3s of inactivity
+  // UI auto-hide
   function revealUI() {
     setShowUI(true);
     clearTimeout(uiTimer.current);
     uiTimer.current = setTimeout(() => setShowUI(false), 3000);
   }
-
   useEffect(() => {
     revealUI();
     return () => clearTimeout(uiTimer.current);
   }, [current]);
 
-  function goTo(index, dir) {
-    if (transitioning || index < 0 || index >= pages.length) return;
-    setDirection(dir);
-    setTransitioning(true);
-    setTimeout(() => {
-      setCurrent(index);
-      setTransitioning(false);
-      setDirection(null);
-    }, 280);
+  // ── Navigation ────────────────────────────────────────────────────────────
+  // Animate to target fraction, then commit index change
+  const navigateTo = useCallback((newIndex, dir) => {
+    if (newIndex < 0 || newIndex >= pages.length) return;
+    // dir: 'left' (going forward) → strip slides left, 'right' → slides right
+    const target = dir === 'left' ? -1 : 1;
+    setAnimating(true);
+    setDragFrac(target);
+    clearTimeout(animTimer.current);
+    animTimer.current = setTimeout(() => {
+      setCurrent(newIndex);
+      setDragFrac(0);
+      setAnimating(false);
+    }, 340);
+  }, [pages.length]);
+
+  const prev = useCallback(() => { navigateTo(current - 1, 'right'); revealUI(); }, [current, navigateTo]);
+  const next = useCallback(() => { navigateTo(current + 1, 'left');  revealUI(); }, [current, navigateTo]);
+
+  // Snap back (not enough drag, or at boundary)
+  function snapBack() {
+    setAnimating(true);
+    setDragFrac(0);
+    clearTimeout(animTimer.current);
+    animTimer.current = setTimeout(() => setAnimating(false), 340);
   }
 
-  function prev() { goTo(current - 1, 'right'); }
-  function next() { goTo(current + 1, 'left');  }
-
+  // Keyboard
   useEffect(() => {
     function onKey(e) {
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { next(); revealUI(); }
-      if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { prev(); revealUI(); }
+      if (animating) return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next();
+      if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   prev();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [current, pages.length, transitioning]);
+  }, [current, pages.length, animating, next, prev]);
 
+  // ── Touch handlers ────────────────────────────────────────────────────────
   function onTouchStart(e) {
-    touchStartX.current = e.touches[0].clientX;
-    touchStartY.current = e.touches[0].clientY;
+    if (animating) return;
+    dragStartX.current = e.touches[0].clientX;
+    dragStartY.current = e.touches[0].clientY;
+    dragAxis.current   = null;
     revealUI();
   }
 
-  function onTouchEnd(e) {
-    if (touchStartX.current === null) return;
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    const dy = e.changedTouches[0].clientY - touchStartY.current;
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      if (dx < 0) next(); else prev();
+  function onTouchMove(e) {
+    if (dragStartX.current === null || animating) return;
+    const dx = e.touches[0].clientX - dragStartX.current;
+    const dy = e.touches[0].clientY - dragStartY.current;
+
+    // Lock axis on first significant move
+    if (!dragAxis.current) {
+      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+        dragAxis.current = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+      }
+      return;
     }
-    touchStartX.current = null;
+    if (dragAxis.current !== 'h') return;
+
+    e.preventDefault(); // prevent scroll while swiping pages
+
+    const fmt = resolveFormat(book?.orientation);
+    const scale = Math.min(vpSize.w / fmt.w, vpSize.h / fmt.h);
+    const scaledW = fmt.w * scale;
+
+    // Convert screen pixels to canvas fraction
+    let frac = dx / scaledW;
+
+    // Rubber-band at boundaries
+    if ((frac > 0 && current === 0) || (frac < 0 && current === pages.length - 1)) {
+      frac = frac * 0.2; // resist pull
+    }
+    // Clamp
+    frac = Math.max(-1.1, Math.min(1.1, frac));
+    setDragFrac(frac);
   }
 
-  // ── Loading / error ────────────────────────────────────────────────────────
+  function onTouchEnd(e) {
+    if (dragStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - dragStartX.current;
+    const fmt = resolveFormat(book?.orientation);
+    const scale = Math.min(vpSize.w / fmt.w, vpSize.h / fmt.h);
+    const scaledW = fmt.w * scale;
+    const frac = dx / scaledW;
+
+    dragStartX.current = null;
+    dragAxis.current   = null;
+
+    if (frac < -0.35 && current < pages.length - 1) {
+      navigateTo(current + 1, 'left');
+    } else if (frac > 0.35 && current > 0) {
+      navigateTo(current - 1, 'right');
+    } else {
+      snapBack();
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
   if (loading) return (
     <div style={fullscreen}>
       <div style={{ color:'rgba(255,255,255,.5)', fontSize:14 }}>Loading…</div>
@@ -264,56 +343,58 @@ export default function ViewerPage() {
     </div>
   );
 
-  const page    = pages[current];
+  const fmt     = resolveFormat(book.orientation);
+  const scale   = Math.min(vpSize.w / fmt.w, vpSize.h / fmt.h);
   const isFirst = current === 0;
   const isLast  = current === pages.length - 1;
-  const fmt     = resolveFormat(book.orientation);
 
-  // Scale the canvas to fill as much of the viewport as possible while
-  // preserving the native pixel layout (fonts, borders, etc. all stay exact).
-  const scale = Math.min(vpSize.w / fmt.w, vpSize.h / fmt.h);
-
-  // Slide transition offset in native pixels (proportional to canvas width)
-  const slideOffset = Math.round(fmt.w * 0.07);
+  // The strip holds [prev, current, next] — each fmt.w wide.
+  // We always show the middle slot (index 1) by default: offset = -fmt.w.
+  // dragFrac shifts on top of that.
+  const stripOffset = (-fmt.w) + (dragFrac * fmt.w);
+  const springStyle = animating || dragFrac !== 0
+    ? (animating ? `transform ${340}ms cubic-bezier(0.25, 0.46, 0.45, 0.94)` : 'none')
+    : 'none';
 
   return (
     <div
       style={{ ...fullscreen, cursor:'none', overflow:'hidden' }}
       onMouseMove={revealUI}
       onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
       onClick={revealUI}
     >
-      {/* ── Canvas — rendered at native size, scaled to viewport ── */}
+      {/* ── Canvas viewport ── */}
       <div style={{
-        width: fmt.w, height: fmt.h, flexShrink: 0,
+        width: fmt.w,
+        height: fmt.h,
         transform: `scale(${scale})`,
         transformOrigin: 'center center',
-        background: '#fff',
         boxShadow: `0 ${Math.round(20 * scale)}px ${Math.round(80 * scale)}px rgba(0,0,0,.7)`,
         overflow: 'hidden',
         position: 'relative',
+        flexShrink: 0,
       }}>
-        {/* Page elements — with slide transition */}
+        {/* Strip: prev | current | next */}
         <div style={{
-          position:'absolute', inset:0,
-          opacity: transitioning ? 0 : 1,
-          transform: transitioning
-            ? `translateX(${direction === 'left' ? -slideOffset : slideOffset}px)`
-            : 'translateX(0)',
-          transition:'opacity .28s ease, transform .28s ease',
+          display: 'flex',
+          width: fmt.w * 3,
+          height: fmt.h,
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          transform: `translateX(${stripOffset}px)`,
+          transition: springStyle,
+          willChange: 'transform',
         }}>
-          {(page.elements || [])
-            .sort((a, b) => (a.layer * 100 + a.z_index) - (b.layer * 100 + b.z_index))
-            .map(el => (
-              <div key={el.id} style={elStyle(el)}>
-                <ElementContent el={el} />
-              </div>
-            ))}
+          <PageCanvas page={pages[current - 1] || null} fmt={fmt} />
+          <PageCanvas page={pages[current]}             fmt={fmt} />
+          <PageCanvas page={pages[current + 1] || null} fmt={fmt} />
         </div>
       </div>
 
-      {/* ── UI overlay (fades in/out) ── */}
+      {/* ── UI overlay ── */}
       <div style={{
         position:'fixed', inset:0, pointerEvents:'none',
         opacity: showUI ? 1 : 0,
@@ -339,18 +420,12 @@ export default function ViewerPage() {
 
         {/* Prev arrow */}
         {!isFirst && (
-          <div
-            style={{ ...arrowBtn, left:16, pointerEvents:'auto', cursor:'pointer' }}
-            onClick={prev}
-          >‹</div>
+          <div style={{ ...arrowBtn, left:16, pointerEvents:'auto', cursor:'pointer' }} onClick={prev}>‹</div>
         )}
 
         {/* Next arrow */}
         {!isLast && (
-          <div
-            style={{ ...arrowBtn, right:16, pointerEvents:'auto', cursor:'pointer' }}
-            onClick={next}
-          >›</div>
+          <div style={{ ...arrowBtn, right:16, pointerEvents:'auto', cursor:'pointer' }} onClick={next}>›</div>
         )}
 
         {/* Dot nav */}
@@ -361,12 +436,12 @@ export default function ViewerPage() {
           {pages.map((_, i) => (
             <div
               key={i}
+              onClick={() => { if (!animating) navigateTo(i, i > current ? 'left' : 'right'); }}
               style={{
                 width: i === current ? 20 : 6, height:6, borderRadius:3,
                 background: i === current ? '#fff' : 'rgba(255,255,255,.4)',
                 transition:'all .2s', cursor:'pointer', pointerEvents:'auto',
               }}
-              onClick={() => goTo(i, i > current ? 'left' : 'right')}
             />
           ))}
         </div>
