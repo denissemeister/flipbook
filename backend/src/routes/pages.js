@@ -113,12 +113,17 @@ router.post('/books/:bookId/pages/:pageId/duplicate', async (req, res) => {
       return res.status(422).json({ error: 'Maximum 100 pages per book' });
     }
 
-    // Shift all pages after the source page up by 1
-    await client.query(
-      `UPDATE pages SET page_number = page_number + 1
-       WHERE book_id = $1 AND page_number > $2`,
-      [req.params.bookId, srcPage.page_number]
-    );
+   // Shift all pages after the source page up by 1 (two-step to avoid unique constraint conflicts)
+await client.query(
+  `UPDATE pages SET page_number = -page_number
+   WHERE book_id = $1 AND page_number > $2`,
+  [req.params.bookId, srcPage.page_number]
+);
+await client.query(
+  `UPDATE pages SET page_number = (-page_number) + 1
+   WHERE book_id = $1 AND page_number < 0`,
+  [req.params.bookId]
+);
 
     // Insert duplicate immediately after source
     const { rows: [newPage] } = await client.query(
