@@ -120,6 +120,7 @@ export default function EditorPage() {
   const saveTimer    = useRef(null);
   const canvasRef    = useRef(null);
   const [editingTitle, setEditingTitle] = useState(false);
+  const [editingSlug, setEditingSlug] = useState(false);
 
   // ── Load book ──────────────────────────────────────────────────────────────
   useEffect(() => {
