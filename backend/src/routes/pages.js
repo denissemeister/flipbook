@@ -113,32 +113,6 @@ router.post('/books/:bookId/pages/:pageId/duplicate', async (req, res) => {
       return res.status(422).json({ error: 'Maximum 100 pages per book' });
     }
 
-   router.post('/books/:bookId/pages/:pageId/duplicate', async (req, res) => {
-  if (!await getBook(req.params.bookId, req.admin.id)) {
-    return res.status(404).json({ error: 'Book not found' });
-  }
-
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-
-    const { rows: [srcPage] } = await client.query(
-      'SELECT * FROM pages WHERE id = $1 AND book_id = $2',
-      [req.params.pageId, req.params.bookId]
-    );
-    if (!srcPage) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Page not found' });
-    }
-
-    const { rows: [{ count }] } = await client.query(
-      'SELECT count(*)::int FROM pages WHERE book_id = $1', [req.params.bookId]
-    );
-    if (count >= 100) {
-      await client.query('ROLLBACK');
-      return res.status(422).json({ error: 'Maximum 100 pages per book' });
-    }
-
     // Insert new page temporarily at the end (safe position)
     const { rows: [newPage] } = await client.query(
       'INSERT INTO pages (book_id, page_number) VALUES ($1, $2) RETURNING *',
@@ -174,13 +148,6 @@ router.post('/books/:bookId/pages/:pageId/duplicate', async (req, res) => {
 
     await client.query('COMMIT');
     res.status(201).json({ ...newPage, page_number: srcPage.page_number + 1 });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-});
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
