@@ -1744,12 +1744,15 @@ function PageContextMenu({ menu, onClose, onAction }) {
 
   const multi = menu.pageIds.length > 1;
   const items = [
-    { label: 'Add Page before', action: 'addBefore', disabled: multi },
-    { label: 'Add Page after',  action: 'addBelow',  disabled: multi },
-    { label: 'Duplicate Page',  action: 'duplicate', disabled: multi },
-    null,
-    { label: multi ? `Delete ${menu.pageIds.length} Pages` : 'Delete Page', action: 'delete', danger: true },
-  ];
+  { label: 'Move Up',          action: 'moveUp',    disabled: multi },
+  { label: 'Move Down',        action: 'moveDown',  disabled: multi },
+  null,
+  { label: 'Add Page before',  action: 'addBefore', disabled: multi },
+  { label: 'Add Page after',   action: 'addBelow',  disabled: multi },
+  { label: 'Duplicate Page',   action: 'duplicate', disabled: multi },
+  null,
+  { label: multi ? `Delete ${menu.pageIds.length} Pages` : 'Delete Page', action: 'delete', danger: true },
+];
 
   return (
     <div ref={ref} style={{
