@@ -1901,10 +1901,142 @@ function LayersPanel({ elements, selectedIds, onSelect, onDeleteSelected }) {
   );
 }
 
+// ── Crop modal ────────────────────────────────────────────────────────────────
+function CropModal({ src, isGif, onConfirm, onCancel }) {
+  const imgRef       = useRef(null);
+  const containerRef = useRef(null);
+  const [loaded, setLoaded] = useState(false);
+  const [crop,   setCrop]   = useState({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function startMove(e) {
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const orig = { ...crop };
+    function onMove(ev) {
+      const r = containerRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const dx = (ev.clientX - startX) / r.width;
+      const dy = (ev.clientY - startY) / r.height;
+      setCrop(c => ({ ...c,
+        x: clamp(orig.x + dx, 0, 1 - orig.w),
+        y: clamp(orig.y + dy, 0, 1 - orig.h),
+      }));
+    }
+    function onUp() {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }
+
+  function startResize(e, corner) {
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const orig = { ...crop };
+    const MIN = 0.05;
+    function onMove(ev) {
+      const r = containerRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const dx = (ev.clientX - startX) / r.width;
+      const dy = (ev.clientY - startY) / r.height;
+      let { x, y, w, h } = orig;
+      if (corner === 'br') { w = clamp(w + dx, MIN, 1 - x); h = clamp(h + dy, MIN, 1 - y); }
+      else if (corner === 'bl') { const nw = clamp(w - dx, MIN, x + w); x = x + w - nw; w = nw; h = clamp(h + dy, MIN, 1 - y); }
+      else if (corner === 'tr') { w = clamp(w + dx, MIN, 1 - x); const nh = clamp(h - dy, MIN, y + h); y = y + h - nh; h = nh; }
+      else if (corner === 'tl') { const nw = clamp(w - dx, MIN, x + w); x = x + w - nw; const nh = clamp(h - dy, MIN, y + h); y = y + h - nh; w = nw; h = nh; }
+      setCrop({ x, y, w, h });
+    }
+    function onUp() {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }
+
+  function applyCrop() {
+    const img = imgRef.current;
+    if (!img) return;
+    const natW = img.naturalWidth, natH = img.naturalHeight;
+    const sx = Math.round(crop.x * natW), sy = Math.round(crop.y * natH);
+    const sw = Math.round(crop.w * natW), sh = Math.round(crop.h * natH);
+    const canvas = document.createElement('canvas');
+    canvas.width = sw; canvas.height = sh;
+    canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    canvas.toBlob(blob => { if (blob) onConfirm(blob); }, 'image/jpeg', 0.92);
+  }
+
+  const handles = [
+    ['tl', { top:-5, left:-5,   cursor:'nw-resize' }],
+    ['tr', { top:-5, right:-5,  cursor:'ne-resize' }],
+    ['bl', { bottom:-5, left:-5,  cursor:'sw-resize' }],
+    ['br', { bottom:-5, right:-5, cursor:'se-resize' }],
+  ];
+
+  return (
+    <div
+      style={{ position:'fixed', inset:0, zIndex:10000, background:'rgba(0,0,0,.87)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}
+      onPointerDown={e => { if (e.target === e.currentTarget) onCancel(); }}
+    >
+      <div style={{ marginBottom:12, textAlign:'center' }}>
+        <div style={{ color:'#fff', fontWeight:700, fontSize:15, marginBottom:4 }}>✂ Crop {isGif ? 'GIF' : 'Image'}</div>
+        <div style={{ color:'rgba(255,255,255,.5)', fontSize:11 }}>Drag the box to reposition · drag corners to resize</div>
+        {isGif && <div style={{ color:'#fbbf24', fontSize:10, marginTop:3 }}>⚠ Cropping a GIF will save a static JPEG of the first frame</div>}
+      </div>
+
+      <div ref={containerRef} style={{ position:'relative', maxWidth:'70vw', maxHeight:'62vh', lineHeight:0 }}>
+        <img
+          ref={imgRef}
+          src={src}
+          crossOrigin="anonymous"
+          onLoad={() => setLoaded(true)}
+          style={{ maxWidth:'70vw', maxHeight:'62vh', display:'block', userSelect:'none', draggable:false }}
+          draggable={false}
+        />
+        {loaded && <>
+          {/* Dark overlay — 4 rects around the crop area */}
+          <div style={{ position:'absolute', left:0, top:0, right:0, height:`${crop.y*100}%`, background:'rgba(0,0,0,.55)', pointerEvents:'none' }} />
+          <div style={{ position:'absolute', left:0, top:`${(crop.y+crop.h)*100}%`, right:0, bottom:0, background:'rgba(0,0,0,.55)', pointerEvents:'none' }} />
+          <div style={{ position:'absolute', left:0, top:`${crop.y*100}%`, width:`${crop.x*100}%`, height:`${crop.h*100}%`, background:'rgba(0,0,0,.55)', pointerEvents:'none' }} />
+          <div style={{ position:'absolute', right:0, top:`${crop.y*100}%`, left:`${(crop.x+crop.w)*100}%`, height:`${crop.h*100}%`, background:'rgba(0,0,0,.55)', pointerEvents:'none' }} />
+
+          {/* Crop rectangle */}
+          <div
+            onPointerDown={startMove}
+            style={{ position:'absolute', left:`${crop.x*100}%`, top:`${crop.y*100}%`, width:`${crop.w*100}%`, height:`${crop.h*100}%`, border:'2px solid #fff', boxSizing:'border-box', cursor:'move' }}
+          >
+            {/* Rule-of-thirds grid */}
+            {[1,2].map(i => <div key={`v${i}`} style={{ position:'absolute', left:`${i*33.33}%`, top:0, bottom:0, width:1, background:'rgba(255,255,255,.25)', pointerEvents:'none' }} />)}
+            {[1,2].map(i => <div key={`h${i}`} style={{ position:'absolute', top:`${i*33.33}%`, left:0, right:0, height:1, background:'rgba(255,255,255,.25)', pointerEvents:'none' }} />)}
+
+            {/* Corner handles */}
+            {handles.map(([pos, hStyle]) => (
+              <div
+                key={pos}
+                onPointerDown={e => startResize(e, pos)}
+                style={{ position:'absolute', width:10, height:10, background:'#fff', border:'2px solid var(--accent)', borderRadius:2, zIndex:10, ...hStyle }}
+              />
+            ))}
+          </div>
+        </>}
+      </div>
+
+      <div style={{ marginTop:14, display:'flex', gap:10 }}>
+        <button onClick={onCancel} style={{ padding:'8px 22px', borderRadius:7, border:'1px solid rgba(255,255,255,.25)', background:'transparent', color:'#fff', fontSize:13, cursor:'pointer' }}>Cancel</button>
+        <button onClick={applyCrop} style={{ padding:'8px 22px', borderRadius:7, border:'none', background:'var(--accent)', color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer' }}>Apply Crop</button>
+      </div>
+    </div>
+  );
+}
+
 // ── Props panel ───────────────────────────────────────────────────────────────
 function PropsPanel({ el, onChange, onDelete, onDuplicate, onCopy, showToast, onUpload, customFonts = [], onFontUpload }) {
   const typeNames = { bg:'Background', image:'Image', text:'Text', gif:'GIF', video:'Video', link:'Link', audio:'Audio', sfx:'Sound Effects', curvetext:'Curve Text' };
   const p = el.props || {};
+  const [showCrop, setShowCrop] = useState(false);
 
   function setProp(key, val) { onChange({ props: { ...p, [key]: val } }); }
 
@@ -2051,6 +2183,37 @@ function PropsPanel({ el, onChange, onDelete, onDuplicate, onCopy, showToast, on
               {['cover','contain','fill','none'].map(v => <option key={v} value={v}>{v}</option>)}
             </select>
           </div>
+          {p.src && (
+            <button
+              onClick={() => setShowCrop(true)}
+              style={{ marginTop:8, width:'100%', padding:'7px', borderRadius:7, border:'1px solid var(--border)', background:'var(--surface2)', color:'var(--text)', fontSize:12, fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:5 }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+            >✂ Crop</button>
+          )}
+          {showCrop && p.src && (
+            <CropModal
+              src={p.src}
+              isGif={el.type === 'gif'}
+              onCancel={() => setShowCrop(false)}
+              onConfirm={async (blob) => {
+                setShowCrop(false);
+                const baseName = (p.fileName || 'image').replace(/\.[^.]+$/, '');
+                const fileName = baseName + '_cropped.jpg';
+                const file = new File([blob], fileName, { type: 'image/jpeg' });
+                const blobUrl = URL.createObjectURL(blob);
+                onChange({ props: { ...p, src: blobUrl, fileName } });
+                showToast('Uploading cropped image…');
+                try {
+                  const url = await onUpload(file);
+                  onChange({ props: { ...p, src: url, fileName } });
+                  showToast('✓ Crop saved');
+                } catch (err) {
+                  showToast('Upload failed: ' + (err.message || 'Unknown error'));
+                }
+              }}
+            />
+          )}
         </Section>
       )}
 
