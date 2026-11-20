@@ -113,27 +113,36 @@ router.post('/books/:bookId/pages/:pageId/duplicate', async (req, res) => {
       return res.status(422).json({ error: 'Maximum 100 pages per book' });
     }
 
-   // Shift all pages after the source page up by 1 (two-step via high temp values)
-const { rows: [{ max_num }] } = await client.query(
-  'SELECT max(page_number) AS max_num FROM pages WHERE book_id = $1',
-  [req.params.bookId]
-);
-const offset = max_num + 1000;
-await client.query(
-  `UPDATE pages SET page_number = page_number + $3
-   WHERE book_id = $1 AND page_number > $2`,
-  [req.params.bookId, srcPage.page_number, offset]
-);
-await client.query(
-  `UPDATE pages SET page_number = page_number - $2 + 1
-   WHERE book_id = $1 AND page_number > $2`,
-  [req.params.bookId, offset]
-);
+   router.post('/books/:bookId/pages/:pageId/duplicate', async (req, res) => {
+  if (!await getBook(req.params.bookId, req.admin.id)) {
+    return res.status(404).json({ error: 'Book not found' });
+  }
 
-    // Insert duplicate immediately after source
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: [srcPage] } = await client.query(
+      'SELECT * FROM pages WHERE id = $1 AND book_id = $2',
+      [req.params.pageId, req.params.bookId]
+    );
+    if (!srcPage) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Page not found' });
+    }
+
+    const { rows: [{ count }] } = await client.query(
+      'SELECT count(*)::int FROM pages WHERE book_id = $1', [req.params.bookId]
+    );
+    if (count >= 100) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({ error: 'Maximum 100 pages per book' });
+    }
+
+    // Insert new page temporarily at the end (safe position)
     const { rows: [newPage] } = await client.query(
       'INSERT INTO pages (book_id, page_number) VALUES ($1, $2) RETURNING *',
-      [req.params.bookId, srcPage.page_number + 1]
+      [req.params.bookId, count + 1]
     );
 
     // Copy all elements
@@ -148,8 +157,30 @@ await client.query(
       );
     }
 
+    // Renumber all pages, placing the new page immediately after the source
+    await client.query(
+      `UPDATE pages p
+       SET page_number = sub.rn
+       FROM (
+         SELECT id,
+           row_number() OVER (
+             ORDER BY CASE WHEN id = $2 THEN $3 + 0.5 ELSE page_number::float END
+           ) AS rn
+         FROM pages WHERE book_id = $1
+       ) sub
+       WHERE p.id = sub.id`,
+      [req.params.bookId, newPage.id, srcPage.page_number]
+    );
+
     await client.query('COMMIT');
-    res.status(201).json(newPage);
+    res.status(201).json({ ...newPage, page_number: srcPage.page_number + 1 });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
