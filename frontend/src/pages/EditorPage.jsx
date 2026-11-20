@@ -564,7 +564,16 @@ export default function EditorPage() {
       showToast('Page duplicated');
     } catch (err) { showToast(err.message); }
   }
-
+async function movePage(pageId, direction) {
+  const page = pages.find(p => p.id === pageId);
+  if (!page) return;
+  const newNum = page.page_number + direction;
+  if (newNum < 1 || newNum > pages.length) return;
+  try {
+    await api.patch(`/books/${id}/pages/${pageId}/reorder`, { page_number: newNum });
+    await reloadPages(pageId);
+  } catch (err) { showToast(err.message); }
+}
   async function deletePages(pageIds) {
     if (pages.length <= pageIds.length) { showToast('Cannot delete all pages'); return; }
     const label = pageIds.length > 1 ? `${pageIds.length} pages` : 'page';
@@ -1173,10 +1182,13 @@ export default function EditorPage() {
           onAction={action => {
             const { pageIds } = pageContextMenu;
             const refPageId = pageIds[0];
+            if (action === 'moveUp')     movePage(refPageId, -1);
+            if (action === 'moveDown')   movePage(refPageId, +1);
             if (action === 'addBelow')   addPageAt('after',  refPageId);
             if (action === 'addBefore')  addPageAt('before', refPageId);
             if (action === 'duplicate')  duplicatePage(refPageId);
             if (action === 'delete')     deletePages(pageIds);
+            
           }}
         />
       )}
