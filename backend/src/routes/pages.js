@@ -158,8 +158,6 @@ await client.query(
   }
 });
 
-// ── PATCH /api/v1/books/:bookId/pages/:pageId/reorder  ───────────────────────
-// Move a page to a new page_number; shift the others to accommodate.
 router.patch('/books/:bookId/pages/:pageId/reorder', async (req, res) => {
   const { page_number: newNum } = req.body;
   if (!newNum || newNum < 1 || newNum > 100) {
@@ -182,8 +180,8 @@ router.patch('/books/:bookId/pages/:pageId/reorder', async (req, res) => {
     const oldNum = page.page_number;
     if (oldNum === newNum) { await client.query('ROLLBACK'); return res.json(page); }
 
-    // Temporarily move page out of the way
-    await client.query('UPDATE pages SET page_number = 0 WHERE id = $1', [page.id]);
+    // Defer unique constraint so intermediate states don't conflict
+    await client.query('SET CONSTRAINTS pages_book_id_page_number_key DEFERRED');
 
     if (newNum > oldNum) {
       await client.query(
