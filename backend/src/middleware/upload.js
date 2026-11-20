@@ -1,11 +1,7 @@
+// backend/src/middleware/upload.js
+// Uses multer memory storage — files go to req.file.buffer, then uploaded to R2.
 const multer = require('multer');
 const path   = require('path');
-const fs     = require('fs');
-
-const STORAGE_PATH = process.env.STORAGE_PATH || './uploads';
-
-// Ensure uploads directory exists
-fs.mkdirSync(STORAGE_PATH, { recursive: true });
 
 // Allowed MIME types per category
 const ALLOWED_TYPES = new Set([
@@ -26,18 +22,26 @@ const ALLOWED_TYPES = new Set([
 
 // File size limits (bytes)
 const SIZE_LIMITS = {
-  image: 50  * 1024 * 1024,   // 50 MB
-  video: 500 * 1024 * 1024,   // 500 MB
-  audio: 100 * 1024 * 1024,   // 100 MB
-  font:  20  * 1024 * 1024,   // 20 MB
-  default: 50 * 1024 * 1024,
+  image:   50  * 1024 * 1024,   // 50 MB
+  video:   500 * 1024 * 1024,   // 500 MB
+  audio:   100 * 1024 * 1024,   // 100 MB
+  font:    20  * 1024 * 1024,   // 20 MB
+  default: 50  * 1024 * 1024,
 };
 
 const FONT_EXTS = new Set(['.ttf', '.otf', '.woff', '.woff2']);
 
 function isFontFile(file) {
-  const ext = require('path').extname(file.originalname).toLowerCase();
+  const ext = path.extname(file.originalname).toLowerCase();
   return FONT_EXTS.has(ext);
+}
+
+function getSubDir(file) {
+  if (file.mimetype.startsWith('image/')) return 'images';
+  if (file.mimetype.startsWith('video/')) return 'videos';
+  if (file.mimetype.startsWith('audio/')) return 'audio';
+  if (isFontFile(file)) return 'fonts';
+  return 'misc';
 }
 
 function getLimit(mime) {
@@ -46,29 +50,7 @@ function getLimit(mime) {
   return SIZE_LIMITS.image;
 }
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // Organise into sub-folders by type
-    let sub = 'misc';
-    if (file.mimetype.startsWith('image/')) sub = 'images';
-    else if (file.mimetype.startsWith('video/')) sub = 'videos';
-    else if (file.mimetype.startsWith('audio/')) sub = 'audio';
-    else if (isFontFile(file)) sub = 'fonts';
-
-    const dir = path.join(STORAGE_PATH, sub);
-    fs.mkdirSync(dir, { recursive: true });
-    req._uploadSubDir = sub;
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const ext  = path.extname(file.originalname).toLowerCase();
-    const name = `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
-    cb(null, name);
-  },
-});
-
 function fileFilter(req, file, cb) {
-  // Font files often come with generic MIME types — check by extension too
   if (ALLOWED_TYPES.has(file.mimetype) || isFontFile(file)) {
     cb(null, true);
   } else {
@@ -76,26 +58,24 @@ function fileFilter(req, file, cb) {
   }
 }
 
+// Memory storage — file lands in req.file.buffer
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter,
-  limits: { fileSize: SIZE_LIMITS.video }, // multer enforces the largest; we validate per-type below
+  limits: { fileSize: SIZE_LIMITS.video }, // multer enforces the largest limit
 });
 
-/**
- * After multer saves the file, verify the per-type size limit.
- * Returns 413 and deletes the file if over limit.
- */
+// After multer, verify per-type size limit and set req._uploadSubDir
 function checkSize(req, res, next) {
   if (!req.file) return next();
   const limit = getLimit(req.file.mimetype);
   if (req.file.size > limit) {
-    fs.unlink(req.file.path, () => {});
     return res.status(413).json({
       error: `File too large. Limit for ${req.file.mimetype} is ${limit / 1024 / 1024} MB.`,
     });
   }
+  req._uploadSubDir = getSubDir(req.file);
   next();
 }
 
-module.exports = { upload, checkSize, STORAGE_PATH };
+module.exports = { upload, checkSize };
