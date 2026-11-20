@@ -63,7 +63,7 @@ router.get('/:id', async (req, res) => {
 
 // ── PATCH /api/v1/books/:id  ──────────────────────────────────────────────────
 router.patch('/:id', async (req, res) => {
-  const allowed = ['title', 'orientation', 'autoplay', 'autoplay_interval_ms', 'preview_video_url'];
+  const allowed = ['title', 'slug', 'orientation', 'autoplay', 'autoplay_interval_ms', 'preview_video_url'];
   const updates = {};
   for (const k of allowed) {
     if (req.body[k] !== undefined) updates[k] = req.body[k];
