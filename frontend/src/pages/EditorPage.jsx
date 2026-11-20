@@ -714,7 +714,35 @@ async function movePage(pageId, direction) {
         >💾 Save</button>
         <button className="btn btn-ghost" onClick={undo} disabled={!undoStack.current.length} style={{ fontSize: 11 }}>↩ Undo</button>
         <button className="btn btn-ghost" onClick={() => navigate(`/admin/books/${id}/read-aloud`)} style={{ fontSize: 11 }}>🔊 Read Aloud</button>
-        <button className="btn btn-ghost" onClick={() => window.open(`/view/${book?.slug}`, '_blank')} disabled={book?.status !== 'published'} style={{ fontSize: 11 }}>▶ Preview</button>
+        {book?.slug && (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)' }}>
+    <span>URL:</span>
+    {editingSlug ? (
+      <input
+        autoFocus
+        defaultValue={book.slug}
+        onBlur={async (e) => {
+          const raw = e.target.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+          setEditingSlug(false);
+          if (raw && raw !== book.slug) {
+            await api.patch(`/books/${id}`, { slug: raw });
+            setBook(b => ({ ...b, slug: raw }));
+          }
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') e.target.blur();
+          if (e.key === 'Escape') setEditingSlug(false);
+        }}
+        style={{ fontSize: 11, background: 'transparent', border: 'none', borderBottom: '1px solid var(--accent)', outline: 'none', color: 'var(--text)', width: 160 }}
+      />
+    ) : (
+      <span onClick={() => setEditingSlug(true)} title="Click to edit URL slug" style={{ cursor: 'pointer', color: 'var(--accent)' }}>
+        {book.slug}
+      </span>
+    )}
+  </div>
+)}
+<button className="btn btn-ghost" onClick={() => window.open(`/view/${book?.slug}`, '_blank')} disabled={book?.status !== 'published'} style={{ fontSize: 11 }}>▶ Preview</button>
         <button className="btn btn-primary" onClick={publish}>✦ Publish</button>
       </div>
 
