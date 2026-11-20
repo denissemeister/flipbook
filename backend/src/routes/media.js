@@ -1,13 +1,53 @@
+// backend/src/routes/media.js
+// Uploads go to Cloudflare R2 (S3-compatible) instead of local disk.
 const express = require('express');
 const path    = require('path');
-const fs      = require('fs');
 const sharp   = require('sharp');
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const db      = require('../db');
 const { requireAuth }        = require('../middleware/auth');
-const { upload, checkSize, STORAGE_PATH } = require('../middleware/upload');
+const { upload, checkSize }  = require('../middleware/upload');
 
 const router = express.Router();
 router.use(requireAuth);
+
+// ── R2 client ──────────────────────────────────────────────────────────────────
+const r2 = new S3Client({
+  region: 'auto',
+  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId:     process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  },
+});
+
+const BUCKET       = process.env.R2_BUCKET_NAME;
+const R2_PUBLIC_URL = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+
+async function uploadToR2(key, buffer, contentType) {
+  await r2.send(new PutObjectCommand({
+    Bucket:      BUCKET,
+    Key:         key,
+    Body:        buffer,
+    ContentType: contentType,
+  }));
+  return `${R2_PUBLIC_URL}/${key}`;
+}
+
+async function deleteFromR2(key) {
+  if (!key) return;
+  try {
+    await r2.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
+  } catch (err) {
+    console.warn('R2 delete failed:', err.message);
+  }
+}
+
+function makeKey(sub, originalName) {
+  const ext  = path.extname(originalName).toLowerCase();
+  const name = `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
+  return `${sub}/${name}`;
+}
 
 // ── POST /api/v1/media/upload  ────────────────────────────────────────────────
 router.post('/upload', upload.single('file'), checkSize, async (req, res) => {
@@ -15,37 +55,33 @@ router.post('/upload', upload.single('file'), checkSize, async (req, res) => {
 
   const file = req.file;
   const sub  = req._uploadSubDir || 'misc';
+  const storageKey = makeKey(sub, file.originalname);
 
-  // storage_key is the path relative to STORAGE_PATH
-  const storageKey = `${sub}/${file.filename}`;
+  let width = null, height = null, thumbnailKey = null;
+  let fileBuffer = file.buffer;
 
-  let width = null, height = null, durationMs = null, thumbnailKey = null;
-
-  // Generate thumbnail for images
+  // Generate thumbnail for images (excluding SVG)
   if (file.mimetype.startsWith('image/') && file.mimetype !== 'image/svg+xml') {
     try {
-      const thumbName = `thumb-${file.filename.replace(/\.[^.]+$/, '.webp')}`;
-      const thumbDir  = path.join(STORAGE_PATH, 'thumbnails');
-      fs.mkdirSync(thumbDir, { recursive: true });
-      const thumbPath = path.join(thumbDir, thumbName);
+      const orig = await sharp(fileBuffer).metadata();
+      width  = orig.width  || null;
+      height = orig.height || null;
 
-      const meta = await sharp(file.path)
+      const thumbBuffer = await sharp(fileBuffer)
         .resize(400, 400, { fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 80 })
-        .toFile(thumbPath);
+        .toBuffer();
 
-      width        = meta.width;
-      height       = meta.height;
-      thumbnailKey = `thumbnails/${thumbName}`;
-
-      // Get original dimensions too
-      const orig = await sharp(file.path).metadata();
-      width  = orig.width  || width;
-      height = orig.height || height;
+      const thumbName = storageKey.replace(/\.[^.]+$/, '.webp');
+      thumbnailKey = `thumbnails/${path.basename(thumbName)}`;
+      await uploadToR2(thumbnailKey, thumbBuffer, 'image/webp');
     } catch (err) {
       console.warn('Thumbnail generation failed:', err.message);
     }
   }
+
+  // Upload original file to R2
+  await uploadToR2(storageKey, fileBuffer, file.mimetype);
 
   const { rows } = await db.query(
     `INSERT INTO media_assets
@@ -53,20 +89,20 @@ router.post('/upload', upload.single('file'), checkSize, async (req, res) => {
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      RETURNING *`,
     [req.admin.id, file.originalname, storageKey, file.mimetype,
-     file.size, width, height, durationMs, thumbnailKey]
+     file.size, width, height, null, thumbnailKey]
   );
 
   const asset = rows[0];
   res.status(201).json({
     ...asset,
-    url:          `/uploads/${asset.storage_key}`,
-    thumbnailUrl: asset.thumbnail_key ? `/uploads/${asset.thumbnail_key}` : null,
+    url:          `${R2_PUBLIC_URL}/${asset.storage_key}`,
+    thumbnailUrl: asset.thumbnail_key ? `${R2_PUBLIC_URL}/${asset.thumbnail_key}` : null,
   });
 });
 
 // ── GET /api/v1/media  ────────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
-  const { type } = req.query; // optional: 'image', 'video', 'audio'
+  const { type } = req.query;
   let query = 'SELECT * FROM media_assets WHERE admin_id = $1';
   const params = [req.admin.id];
 
@@ -80,8 +116,8 @@ router.get('/', async (req, res) => {
 
   res.json(rows.map(a => ({
     ...a,
-    url:          `/uploads/${a.storage_key}`,
-    thumbnailUrl: a.thumbnail_key ? `/uploads/${a.thumbnail_key}` : null,
+    url:          `${R2_PUBLIC_URL}/${a.storage_key}`,
+    thumbnailUrl: a.thumbnail_key ? `${R2_PUBLIC_URL}/${a.thumbnail_key}` : null,
   })));
 });
 
@@ -102,13 +138,9 @@ router.delete('/:id', async (req, res) => {
     return res.status(409).json({ error: 'Asset is in use by one or more elements' });
   }
 
-  // Delete files from disk
-  const del = (key) => {
-    if (!key) return;
-    try { fs.unlinkSync(path.join(STORAGE_PATH, key)); } catch {}
-  };
-  del(asset.storage_key);
-  del(asset.thumbnail_key);
+  // Delete from R2
+  await deleteFromR2(asset.storage_key);
+  await deleteFromR2(asset.thumbnail_key);
 
   await db.query('DELETE FROM media_assets WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
