@@ -131,21 +131,23 @@ router.post('/books/:bookId/pages/:pageId/duplicate', async (req, res) => {
       );
     }
 
-    // Renumber all pages, placing the new page immediately after the source
-    await client.query(
-      `UPDATE pages p
-       SET page_number = sub.rn
-       FROM (
-         SELECT id,
-           row_number() OVER (
-             ORDER BY CASE WHEN id = $2 THEN $3 + 0.5 ELSE page_number::float END
-           ) AS rn
-         FROM pages WHERE book_id = $1
-       ) sub
-       WHERE p.id = sub.id`,
-      [req.params.bookId, newPage.id, srcPage.page_number]
-    );
+    // Defer unique constraint so the renumber UPDATE runs without conflicts
+await client.query('SET CONSTRAINTS pages_book_id_page_number_key DEFERRED');
 
+// Renumber all pages, placing the new page immediately after the source
+await client.query(
+  `UPDATE pages p
+   SET page_number = sub.rn
+   FROM (
+     SELECT id,
+       row_number() OVER (
+         ORDER BY CASE WHEN id = $2 THEN $3 + 0.5 ELSE page_number::float END
+       ) AS rn
+     FROM pages WHERE book_id = $1
+   ) sub
+   WHERE p.id = sub.id`,
+  [req.params.bookId, newPage.id, srcPage.page_number]
+);
     await client.query('COMMIT');
     res.status(201).json({ ...newPage, page_number: srcPage.page_number + 1 });
   } catch (err) {
