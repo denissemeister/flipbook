@@ -1432,6 +1432,7 @@ function CanvasElement({ el, selected, isEditing, onSelect, onStartEdit, onStopE
   const divRef = useRef(null);
   const fileInputRef = useRef(null);
   const THRESHOLD = 4;
+  const [previewSrc, setPreviewSrc] = useState(null); // blob URL shown while uploading, never saved
 
   // ── Inline text editing state ────────────────────────────────────────────────
   // Controlled so we always know the latest value even if onBlur doesn't fire.
@@ -1472,15 +1473,17 @@ function CanvasElement({ el, selected, isEditing, onSelect, onStartEdit, onStopE
     const file = e.target.files[0];
     if (!file) return;
     e.target.value = '';
-    // Show immediately with a blob URL while uploading
+    // Show preview locally via state — do NOT call onChange until we have the real URL
     const blobUrl = URL.createObjectURL(file);
-    onChange({ props: { ...(el.props || {}), src: blobUrl, fileName: file.name } });
+    setPreviewSrc(blobUrl);
     if (onToast) onToast('Uploading ' + file.name + '…');
     try {
       const url = await onUpload(file);
+      setPreviewSrc(null);
       onChange({ props: { ...(el.props || {}), src: url, fileName: file.name } });
       if (onToast) onToast('✓ ' + file.name + ' saved');
     } catch (err) {
+      setPreviewSrc(null);
       if (onToast) onToast('Upload failed: ' + (err.message || 'Unknown error'));
     }
   }
@@ -1615,7 +1618,7 @@ function CanvasElement({ el, selected, isEditing, onSelect, onStartEdit, onStopE
       onMouseLeave={e => { if (!selected) e.currentTarget.style.borderColor = 'transparent'; }}
     >
       {/* Hide rendered text while editing so textarea text doesn't double up */}
-      {!isTextEditing && <ElementContent el={el} />}
+      {!isTextEditing && <ElementContent el={el} previewSrc={previewSrc} />}
 
       {/* Edit-text button — visible when text element is selected but not yet editing.
           Lets the user enter edit mode without ambiguity about drag vs edit. */}
@@ -1688,7 +1691,7 @@ function CanvasElement({ el, selected, isEditing, onSelect, onStartEdit, onStopE
   );
 }
 
-function ElementContent({ el }) {
+function ElementContent({ el, previewSrc }) {
   const p = el.props || {};
   const type = el.type;
 
@@ -1698,8 +1701,9 @@ function ElementContent({ el }) {
 
   if (type === 'image' || type === 'gif') {
     const fit = p.fit || 'cover';
-    return p.src
-      ? <img src={p.src} style={{ width:'100%', height:'100%', objectFit: fit, display:'block' }} alt={p.altText || ''} />
+    const src = previewSrc || p.src;
+    return src
+      ? <img src={src} style={{ width:'100%', height:'100%', objectFit: fit, display:'block' }} alt={p.altText || ''} />
       : <div style={{ width:'100%', height:'100%', background:'linear-gradient(135deg,#065f46,#064e3b)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:6, color:'rgba(255,255,255,.5)', pointerEvents:'none' }}>
           <div style={{ fontSize:26 }}>{type === 'gif' ? 'GIF' : '🖼'}</div>
           <div style={{ fontSize:11, fontWeight:700, color:'rgba(255,255,255,.7)' }}>Double-click to upload</div>
@@ -2037,6 +2041,7 @@ function PropsPanel({ el, onChange, onDelete, onDuplicate, onCopy, showToast, on
   const typeNames = { bg:'Background', image:'Image', text:'Text', gif:'GIF', video:'Video', link:'Link', audio:'Audio', sfx:'Sound Effects', curvetext:'Curve Text' };
   const p = el.props || {};
   const [showCrop, setShowCrop] = useState(false);
+  const [uploadingPreview, setUploadingPreview] = useState(null); // blob URL shown while uploading
 
   function setProp(key, val) { onChange({ props: { ...p, [key]: val } }); }
 
@@ -2044,15 +2049,17 @@ function PropsPanel({ el, onChange, onDelete, onDuplicate, onCopy, showToast, on
     const file = e.target.files[0];
     if (!file) return;
     e.target.value = '';
-    // Show immediately with a blob URL while uploading
+    // Show preview locally — do NOT call onChange until we have the real URL
     const blobUrl = URL.createObjectURL(file);
-    onChange({ props: { ...p, src: blobUrl, fileName: file.name, fit: p.fit || 'cover' } });
+    setUploadingPreview(blobUrl);
     showToast('Uploading ' + file.name + '…');
     try {
       const url = await onUpload(file);
+      setUploadingPreview(null);
       onChange({ props: { ...p, src: url, fileName: file.name, fit: p.fit || 'cover' } });
       showToast('✓ ' + file.name + ' saved');
     } catch (err) {
+      setUploadingPreview(null);
       showToast('Upload failed: ' + (err.message || 'Unknown error'));
     }
   }
@@ -2170,8 +2177,8 @@ function PropsPanel({ el, onChange, onDelete, onDuplicate, onCopy, showToast, on
         <Section title={el.type === 'gif' ? 'GIF' : 'Image'}>
           <label style={{ display: 'block', cursor: 'pointer' }}>
             <div style={{ background: 'var(--surface2)', border: '2px dashed var(--border)', borderRadius: 8, padding: p.src ? 8 : 16, textAlign: 'center', marginBottom: 8 }}>
-              {p.src
-                ? <><img src={p.src} style={{ width:'100%', height:70, objectFit:'cover', borderRadius:5, marginBottom:4, display:'block' }} /><span style={{ fontSize:10, color:'var(--muted)' }}>{p.fileName}</span><br/><span style={{ fontSize:10, color:'var(--accent)' }}>Click to replace</span></>
+              {(uploadingPreview || p.src)
+                ? <><img src={uploadingPreview || p.src} style={{ width:'100%', height:70, objectFit:'cover', borderRadius:5, marginBottom:4, display:'block' }} /><span style={{ fontSize:10, color:'var(--muted)' }}>{uploadingPreview ? 'Uploading…' : p.fileName}</span><br/><span style={{ fontSize:10, color:'var(--accent)' }}>{uploadingPreview ? '' : 'Click to replace'}</span></>
                 : <><div style={{ fontSize:22, marginBottom:4 }}>🖼</div><div style={{ fontSize:12, fontWeight:600, color:'var(--accent)' }}>Click to upload</div><div style={{ fontSize:10, color:'var(--muted)' }}>JPEG · PNG · WebP · GIF</div></>
               }
             </div>
