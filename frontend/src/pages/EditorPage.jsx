@@ -168,8 +168,10 @@ export default function EditorPage() {
     api.get(`/pages/${activePage.id}/elements`)
       .then(els => {
         // Pre-load any Google Fonts already stored in text elements
-        els.forEach(el => { if (el.type === 'text' && el.props?.fontFamily) loadGoogleFont(el.props.fontFamily); });
-        setElements(prev => ({ ...prev, [activePage.id]: els }));
+        // Assign stable _cid to server-loaded elements (their id never changes, but _cid keeps key stable)
+        const withCid = els.map(el => el._cid ? el : { ...el, _cid: el.id });
+        withCid.forEach(el => { if (el.type === 'text' && el.props?.fontFamily) loadGoogleFont(el.props.fontFamily); });
+        setElements(prev => ({ ...prev, [activePage.id]: withCid }));
       })
       .catch(err => showToast('Failed to load elements: ' + err.message));
   }, [activePage]);
@@ -382,8 +384,10 @@ export default function EditorPage() {
   function addElement(type) {
     if (!activePage) return;
     const sz = DEFAULT_SIZE[type] || { w: 0.3, h: 0.2 };
+    const tempId = 'new-' + Date.now();
     const newEl = {
-      id: 'new-' + Date.now(),
+      id: tempId,
+      _cid: tempId, // stable React key — never changes even after server assigns a real ID
       _new: true,
       type, layer: DEFAULT_LAYER[type] || 2,
       col_start: (1 - sz.w) / 2,  // horizontally centered by default
@@ -431,7 +435,8 @@ export default function EditorPage() {
     const src = (elements[pageId] || []).find(e => e.id === elId);
     if (!src) return;
     pushUndo(pageId, 'Duplicate');
-    const copy = { ...src, id: 'new-' + Date.now(), _new: true, col_start: src.col_start + 0.02, row_start: src.row_start + 0.02 };
+    const tempId = 'new-' + Date.now();
+    const copy = { ...src, id: tempId, _cid: tempId, _new: true, col_start: src.col_start + 0.02, row_start: src.row_start + 0.02 };
     const els = [...(elements[pageId] || []), copy];
     updateElements(pageId, els);
     setSelectedIds(new Set([copy.id]));
@@ -450,11 +455,10 @@ export default function EditorPage() {
   if (!activePage || !clipboardEls.current.length) return;
   const pageId = activePage.id;
   pushUndo(pageId, 'Paste');
-  const newEls = clipboardEls.current.map(src => ({
-    ...src,
-    id: 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2),
-    _new: true,
-  }));
+  const newEls = clipboardEls.current.map(src => {
+    const tempId = 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    return { ...src, id: tempId, _cid: tempId, _new: true };
+  });
   updateElements(pageId, [...(elements[pageId] || []), ...newEls]);
   setSelectedIds(new Set(newEls.map(el => el.id)));
   const n = newEls.length;
@@ -1086,7 +1090,7 @@ async function movePage(pageId, direction) {
             {/* Elements */}
             {pageEls.map(el => (
               <CanvasElement
-                key={el.id}
+                key={el._cid || el.id}
                 el={el}
                 selected={selectedIds.has(el.id)}
                 isEditing={el.id === editingId}
