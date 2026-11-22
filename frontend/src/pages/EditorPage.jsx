@@ -184,7 +184,6 @@ export default function EditorPage() {
   // ── Auto-save (debounced) ──────────────────────────────────────────────────
   async function doSave(pageId, els) {
     setSaveStatus('saving');
-    console.log('[doSave] saving', els.length, 'elements:', els.map(e => ({ id: e.id, type: e.type, src: e.props?.src?.slice(0,60), _new: e._new })));
     try {
       const payload = els.map(e => ({
         id: e._new ? undefined : e.id,
@@ -1487,14 +1486,11 @@ function CanvasElement({ el, selected, isEditing, onSelect, onStartEdit, onStopE
     if (onToast) onToast('Uploading ' + file.name + '…');
     try {
       const url = await onUpload(file);
-      console.log('[upload] got url:', url, 'el.id:', el.id, 'el.type:', el.type);
       setPreviewSrc(null);
       onChange({ props: { ...(el.props || {}), src: url, fileName: file.name } });
-      console.log('[upload] onChange called with src:', url);
       if (onToast) onToast('✓ ' + file.name + ' saved');
     } catch (err) {
       setPreviewSrc(null);
-      console.error('[upload] failed:', err);
       if (onToast) onToast('Upload failed: ' + (err.message || 'Unknown error'));
     }
   }
