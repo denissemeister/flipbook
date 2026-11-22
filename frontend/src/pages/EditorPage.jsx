@@ -63,14 +63,23 @@ export function loadCustomFont(family, url) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const LAYER_NAMES = ['', 'Background', 'Images', 'Text', 'Audio', 'Sound Effects'];
-const DEFAULT_LAYER = { text: 3, image: 2, gif: 2, video: 2, link: 3, audio: 4, bg: 1, sfx: 5, curvetext: 3 };
+const DEFAULT_LAYER = { text: 3, image: 2, gif: 2, video: 2, link: 3, audio: 4, bg: 1, sfx: 5, curvetext: 3, media: 2 };
 const DEFAULT_SIZE  = {
   text:  { w: 0.4, h: 0.2 }, image: { w: 0.4, h: 0.4 },
   gif:   { w: 0.3, h: 0.3 }, video: { w: 0.4, h: 0.4 },
   link:  { w: 0.24, h: 0.1 }, audio: { w: 0.3, h: 0.1 },
   sfx:   { w: 0.3, h: 0.1 }, bg: { w: 1, h: 1 },
-  curvetext: { w: 0.6, h: 0.35 },
+  curvetext: { w: 0.6, h: 0.35 }, media: { w: 0.4, h: 0.4 },
 };
+
+// Detect media kind from a URL or MIME type
+function mediaKind(src) {
+  if (!src) return 'unknown';
+  const s = src.toLowerCase().split('?')[0];
+  if (/\.(mp4|webm|mov|ogv)$/.test(s)) return 'video';
+  if (/\.(mp3|aac|ogg|wav|m4a|flac)$/.test(s)) return 'audio';
+  return 'image'; // jpeg, png, webp, gif, avif, svg …
+}
 
 function elStyle(el) {
   return {
@@ -762,14 +771,11 @@ async function movePage(pageId, direction) {
           </div>
 
           {[
-            { type:'text',  icon:'T',   label:'Text',          bg:'rgba(99,102,241,.2)' },
-            { type:'image', icon:'🖼',  label:'Image',         bg:'rgba(34,197,94,.2)' },
-            { type:'gif',   icon:'GIF', label:'Animated GIF',  bg:'rgba(245,158,11,.2)' },
-            { type:'video', icon:'▶',   label:'Video',         bg:'rgba(239,68,68,.2)' },
-            { type:'link',  icon:'🔗',  label:'Link',          bg:'rgba(168,85,247,.2)' },
-            { type:'audio', icon:'♪',   label:'Audio',         bg:'rgba(14,165,233,.2)' },
-            { type:'sfx',       icon:'✨',  label:'Sound Effects', bg:'rgba(168,85,247,.2)' },
-            { type:'curvetext', icon:'∿T',  label:'Curve Text',    bg:'rgba(236,72,153,.2)' },
+            { type:'text',      icon:'T',   label:'Text',        bg:'rgba(99,102,241,.2)' },
+            { type:'media',     icon:'🎬',  label:'Media',       bg:'rgba(34,197,94,.2)' },
+            { type:'link',      icon:'🔗',  label:'Link',        bg:'rgba(168,85,247,.2)' },
+            { type:'sfx',       icon:'✨',  label:'Sound Effect',bg:'rgba(245,158,11,.2)' },
+            { type:'curvetext', icon:'∿T',  label:'Curve Text',  bg:'rgba(236,72,153,.2)' },
           ].map(item => (
             <div
               key={item.type}
@@ -1465,6 +1471,7 @@ function CanvasElement({ el, selected, isEditing, onSelect, onStartEdit, onStopE
     video: 'video/mp4,video/webm,video/quicktime',
     audio: 'audio/mpeg,audio/ogg,audio/wav,audio/aac',
     sfx:   'audio/mpeg,audio/ogg,audio/wav,audio/aac',
+    media: 'image/jpeg,image/png,image/webp,image/avif,image/gif,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/ogg,audio/wav,audio/aac',
   };
   const acceptType   = UPLOAD_ACCEPT[el.type];
   const isUploadable = !!acceptType;
@@ -1699,20 +1706,30 @@ function ElementContent({ el, previewSrc }) {
     <div style={{ width:'100%', height:'100%', background: p.color ? p.color : 'linear-gradient(135deg,#1e293b,#0f172a)' }} />
   );
 
-  if (type === 'image' || type === 'gif') {
+  if (type === 'image' || type === 'gif' || type === 'video' || type === 'media') {
     const fit = p.fit || 'cover';
     const src = previewSrc || p.src;
-    const isVideo = src && /\.(webm|mp4)$/i.test(src);
-    if (src && isVideo) return (
+    const kind = mediaKind(src);
+    if (src && kind === 'video') return (
       <video src={src} style={{ width:'100%', height:'100%', objectFit: fit, display:'block' }} autoPlay loop muted playsInline />
     );
-    return src
-      ? <img src={src} style={{ width:'100%', height:'100%', objectFit: fit, display:'block' }} alt={p.altText || ''} />
-      : <div style={{ width:'100%', height:'100%', background:'linear-gradient(135deg,#065f46,#064e3b)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:6, color:'rgba(255,255,255,.5)', pointerEvents:'none' }}>
-          <div style={{ fontSize:26 }}>{type === 'gif' ? 'GIF' : '🖼'}</div>
-          <div style={{ fontSize:11, fontWeight:700, color:'rgba(255,255,255,.7)' }}>Double-click to upload</div>
-          <div style={{ fontSize:10, color:'rgba(255,255,255,.35)' }}>{type === 'gif' ? 'GIF' : 'JPEG · PNG · WebP'}</div>
-        </div>;
+    if (src && kind === 'audio') return (
+      <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:6, background:'rgba(14,165,233,.1)' }}>
+        <div style={{ fontSize:24, color:'#38bdf8' }}>♪</div>
+        <div style={{ fontSize:11, fontWeight:700, color:'#38bdf8' }}>{p.fileName || 'Audio'}</div>
+        <audio src={src} controls style={{ width:'90%', marginTop:4 }} />
+      </div>
+    );
+    if (src) return (
+      <img src={src} style={{ width:'100%', height:'100%', objectFit: fit, display:'block' }} alt={p.altText || ''} />
+    );
+    return (
+      <div style={{ width:'100%', height:'100%', background:'linear-gradient(135deg,#065f46,#064e3b)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:6, color:'rgba(255,255,255,.5)', pointerEvents:'none' }}>
+        <div style={{ fontSize:26 }}>🎬</div>
+        <div style={{ fontSize:11, fontWeight:700, color:'rgba(255,255,255,.7)' }}>Double-click to upload</div>
+        <div style={{ fontSize:10, color:'rgba(255,255,255,.35)' }}>Image · GIF · Video · Audio</div>
+      </div>
+    );
   }
 
   if (type === 'text') {
@@ -1740,24 +1757,6 @@ function ElementContent({ el, previewSrc }) {
   if (hasRich) return <div style={textStyle} dangerouslySetInnerHTML={{ __html: p.richText }} />;
   return <div style={textStyle}>{txt}</div>;
 }
-
-  if (type === 'video') return p.src
-    ? <video src={p.src} style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} muted loop autoPlay />
-    : <div style={{ width:'100%', height:'100%', background:'linear-gradient(135deg,#1e1e3f,#12122a)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:6, pointerEvents:'none' }}>
-        <div style={{ fontSize:28, color:'rgba(255,255,255,.3)' }}>▶</div>
-        <div style={{ fontSize:11, fontWeight:700, color:'rgba(255,255,255,.5)' }}>Double-click to upload</div>
-        <div style={{ fontSize:10, color:'rgba(255,255,255,.25)' }}>MP4 · WebM · MOV</div>
-      </div>;
-
-  if (type === 'audio') return p.src
-    ? <div style={{ width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(14,165,233,.1)', fontSize:11, color:'#38bdf8', fontWeight:600, gap:6 }}>
-        ♪ {p.fileName || 'Audio'}
-      </div>
-    : <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:6, background:'rgba(14,165,233,.08)', pointerEvents:'none' }}>
-        <div style={{ fontSize:24, color:'rgba(14,165,233,.5)' }}>♪</div>
-        <div style={{ fontSize:11, fontWeight:700, color:'rgba(14,165,233,.8)' }}>Double-click to upload</div>
-        <div style={{ fontSize:10, color:'rgba(255,255,255,.3)' }}>MP3 · AAC · OGG · WAV</div>
-      </div>;
 
   if (type === 'sfx') return p.src
     ? <div style={{ width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(168,85,247,.1)', fontSize:11, color:'#c084fc', fontWeight:600, gap:6 }}>
@@ -1831,7 +1830,7 @@ function PageContextMenu({ menu, onClose, onAction }) {
 }
 
 // ── Layers panel ─────────────────────────────────────────────────────────────
-const TYPE_ICON = { bg:'🎨', image:'🖼', gif:'🎞', video:'🎬', text:'T', link:'🔗', audio:'🎵', sfx:'✨', curvetext:'∿' };
+const TYPE_ICON = { bg:'🎨', image:'🖼', gif:'🎞', video:'🎬', text:'T', link:'🔗', audio:'🎵', sfx:'✨', curvetext:'∿', media:'🎬' };
 
 function LayersPanel({ elements, selectedIds, onSelect, onDeleteSelected }) {
   // Render layers highest-first (visually on top → on bottom)
@@ -2042,7 +2041,7 @@ function CropModal({ src, isGif, onConfirm, onCancel }) {
 
 // ── Props panel ───────────────────────────────────────────────────────────────
 function PropsPanel({ el, onChange, onDelete, onDuplicate, onCopy, showToast, onUpload, customFonts = [], onFontUpload }) {
-  const typeNames = { bg:'Background', image:'Image', text:'Text', gif:'GIF', video:'Video', link:'Link', audio:'Audio', sfx:'Sound Effects', curvetext:'Curve Text' };
+  const typeNames = { bg:'Background', image:'Image', text:'Text', gif:'GIF', video:'Video', link:'Link', audio:'Audio', sfx:'Sound Effects', curvetext:'Curve Text', media:'Media' };
   const p = el.props || {};
   const [showCrop, setShowCrop] = useState(false);
   const [uploadingPreview, setUploadingPreview] = useState(null); // blob URL shown while uploading
@@ -2177,56 +2176,66 @@ function PropsPanel({ el, onChange, onDelete, onDuplicate, onCopy, showToast, on
         </Section>
       )}
 
-      {(el.type === 'image' || el.type === 'gif') && (
-        <Section title={el.type === 'gif' ? 'GIF' : 'Image'}>
-          <label style={{ display: 'block', cursor: 'pointer' }}>
-            <div style={{ background: 'var(--surface2)', border: '2px dashed var(--border)', borderRadius: 8, padding: p.src ? 8 : 16, textAlign: 'center', marginBottom: 8 }}>
-              {(uploadingPreview || p.src)
-                ? <><img src={uploadingPreview || p.src} style={{ width:'100%', height:70, objectFit:'cover', borderRadius:5, marginBottom:4, display:'block' }} /><span style={{ fontSize:10, color:'var(--muted)' }}>{uploadingPreview ? 'Uploading…' : p.fileName}</span><br/><span style={{ fontSize:10, color:'var(--accent)' }}>{uploadingPreview ? '' : 'Click to replace'}</span></>
-                : <><div style={{ fontSize:22, marginBottom:4 }}>🖼</div><div style={{ fontSize:12, fontWeight:600, color:'var(--accent)' }}>Click to upload</div><div style={{ fontSize:10, color:'var(--muted)' }}>JPEG · PNG · WebP · GIF</div></>
-              }
-            </div>
-            <input type="file" accept={el.type==='gif'?'image/gif':'image/jpeg,image/png,image/webp,image/avif'} style={{ display:'none' }} onChange={handleMediaUpload} />
-          </label>
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:11, color:'var(--muted)', width:28 }}>Fit</span>
-            <select className="input input-sm" style={{ flex:1 }} value={p.fit||'cover'} onChange={e => setProp('fit', e.target.value)}>
-              {['cover','contain','fill','none'].map(v => <option key={v} value={v}>{v}</option>)}
-            </select>
-          </div>
-          {p.src && (
-            <button
-              onClick={() => setShowCrop(true)}
-              style={{ marginTop:8, width:'100%', padding:'7px', borderRadius:7, border:'1px solid var(--border)', background:'var(--surface2)', color:'var(--text)', fontSize:12, fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:5 }}
-              onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
-            >✂ Crop</button>
-          )}
-          {showCrop && p.src && (
-            <CropModal
-              src={p.src}
-              isGif={el.type === 'gif'}
-              onCancel={() => setShowCrop(false)}
-              onConfirm={async (blob) => {
-                setShowCrop(false);
-                const baseName = (p.fileName || 'image').replace(/\.[^.]+$/, '');
-                const fileName = baseName + '_cropped.jpg';
-                const file = new File([blob], fileName, { type: 'image/jpeg' });
-                const blobUrl = URL.createObjectURL(blob);
-                onChange({ props: { ...p, src: blobUrl, fileName } });
-                showToast('Uploading cropped image…');
-                try {
-                  const url = await onUpload(file);
-                  onChange({ props: { ...p, src: url, fileName } });
-                  showToast('✓ Crop saved');
-                } catch (err) {
-                  showToast('Upload failed: ' + (err.message || 'Unknown error'));
-                }
-              }}
-            />
-          )}
-        </Section>
-      )}
+      {(el.type === 'image' || el.type === 'gif' || el.type === 'video' || el.type === 'audio' || el.type === 'media') && (() => {
+        const src = uploadingPreview || p.src;
+        const kind = mediaKind(src);
+        const accept = 'image/jpeg,image/png,image/webp,image/avif,image/gif,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/ogg,audio/wav,audio/aac';
+        return (
+          <Section title="Media">
+            <label style={{ display:'block', cursor:'pointer' }}>
+              <div style={{ background:'var(--surface2)', border:'2px dashed var(--border)', borderRadius:8, padding: src ? 8 : 16, textAlign:'center', marginBottom:8 }}>
+                {src ? (
+                  kind === 'video'
+                    ? <><video src={src} style={{ width:'100%', height:70, objectFit:'cover', borderRadius:5, marginBottom:4, display:'block' }} muted autoPlay loop playsInline /><span style={{ fontSize:10, color:'var(--accent)' }}>{uploadingPreview ? 'Uploading…' : 'Click to replace'}</span></>
+                    : kind === 'audio'
+                    ? <><div style={{ fontSize:22, marginBottom:4 }}>♪</div><div style={{ fontSize:11, color:'var(--muted)' }}>{p.fileName || 'Audio'}</div><span style={{ fontSize:10, color:'var(--accent)' }}>{uploadingPreview ? 'Uploading…' : 'Click to replace'}</span></>
+                    : <><img src={src} style={{ width:'100%', height:70, objectFit:'cover', borderRadius:5, marginBottom:4, display:'block' }} /><span style={{ fontSize:10, color:'var(--muted)' }}>{uploadingPreview ? 'Uploading…' : p.fileName}</span><br/><span style={{ fontSize:10, color:'var(--accent)' }}>{uploadingPreview ? '' : 'Click to replace'}</span></>
+                ) : (
+                  <><div style={{ fontSize:22, marginBottom:4 }}>🎬</div><div style={{ fontSize:12, fontWeight:600, color:'var(--accent)' }}>Click to upload</div><div style={{ fontSize:10, color:'var(--muted)' }}>Image · GIF · Video · Audio</div></>
+                )}
+              </div>
+              <input type="file" accept={accept} style={{ display:'none' }} onChange={handleMediaUpload} />
+            </label>
+            {kind !== 'audio' && (
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+                <span style={{ fontSize:11, color:'var(--muted)', width:28 }}>Fit</span>
+                <select className="input input-sm" style={{ flex:1 }} value={p.fit||'cover'} onChange={e => setProp('fit', e.target.value)}>
+                  {['cover','contain','fill','none'].map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+            )}
+            {src && kind === 'image' && (
+              <button
+                onClick={() => setShowCrop(true)}
+                style={{ marginTop:4, width:'100%', padding:'7px', borderRadius:7, border:'1px solid var(--border)', background:'var(--surface2)', color:'var(--text)', fontSize:12, fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:5 }}
+                onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+              >✂ Crop</button>
+            )}
+            {showCrop && src && kind === 'image' && (
+              <CropModal
+                src={src}
+                isGif={false}
+                onCancel={() => setShowCrop(false)}
+                onConfirm={async (blob) => {
+                  setShowCrop(false);
+                  const baseName = (p.fileName || 'image').replace(/\.[^.]+$/, '');
+                  const fileName = baseName + '_cropped.jpg';
+                  const file = new File([blob], fileName, { type: 'image/jpeg' });
+                  showToast('Uploading cropped image…');
+                  try {
+                    const url = await onUpload(file);
+                    onChange({ props: { ...p, src: url, fileName } });
+                    showToast('✓ Crop saved');
+                  } catch (err) {
+                    showToast('Upload failed: ' + (err.message || 'Unknown error'));
+                  }
+                }}
+              />
+            )}
+          </Section>
+        );
+      })()}
 
       {el.type === 'text' && (
         <Section title="Text">
@@ -2288,34 +2297,6 @@ function PropsPanel({ el, onChange, onDelete, onDuplicate, onCopy, showToast, on
               {p.letterSpacing ?? 0}
             </span>
           </div>
-        </Section>
-      )}
-
-      {el.type === 'video' && (
-        <Section title="Video">
-          <label style={{ display:'block', cursor:'pointer' }}>
-            <div style={{ background:'var(--surface2)', border:'2px dashed var(--border)', borderRadius:8, padding: p.src ? 8 : 16, textAlign:'center', marginBottom:8 }}>
-              {p.src
-                ? <><video src={p.src} style={{ width:'100%', height:70, objectFit:'cover', borderRadius:5, display:'block', marginBottom:4 }} muted /><span style={{ fontSize:10, color:'var(--accent)' }}>Click to replace</span></>
-                : <><div style={{ fontSize:22, marginBottom:4 }}>▶</div><div style={{ fontSize:12, fontWeight:600, color:'var(--accent)' }}>Click to upload</div><div style={{ fontSize:10, color:'var(--muted)' }}>MP4 · WebM · MOV</div></>
-              }
-            </div>
-            <input type="file" accept="video/mp4,video/webm,video/quicktime" style={{ display:'none' }} onChange={handleMediaUpload} />
-          </label>
-        </Section>
-      )}
-
-      {el.type === 'audio' && (
-        <Section title="Audio">
-          <label style={{ display:'block', cursor:'pointer' }}>
-            <div style={{ background:'var(--surface2)', border:'2px dashed var(--border)', borderRadius:8, padding:14, textAlign:'center', marginBottom:8 }}>
-              {p.src
-                ? <><audio src={p.src} controls style={{ width:'100%', marginBottom:4 }} /><span style={{ fontSize:10, color:'var(--accent)' }}>Click to replace</span></>
-                : <><div style={{ fontSize:22, marginBottom:4 }}>♪</div><div style={{ fontSize:12, fontWeight:600, color:'var(--accent)' }}>Click to upload</div><div style={{ fontSize:10, color:'var(--muted)' }}>MP3 · AAC · OGG · WAV</div></>
-              }
-            </div>
-            <input type="file" accept="audio/mpeg,audio/ogg,audio/wav,audio/aac" style={{ display:'none' }} onChange={handleMediaUpload} />
-          </label>
         </Section>
       )}
 
