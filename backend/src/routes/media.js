@@ -1,12 +1,45 @@
 // backend/src/routes/media.js
 // Uploads go to Cloudflare R2 (S3-compatible) instead of local disk.
-const express = require('express');
-const path    = require('path');
-const sharp   = require('sharp');
+const express  = require('express');
+const path     = require('path');
+const os       = require('os');
+const fs       = require('fs').promises;
+const sharp    = require('sharp');
+const ffmpeg   = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
 const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
-const db      = require('../db');
+const db       = require('../db');
 const { requireAuth }        = require('../middleware/auth');
 const { upload, checkSize }  = require('../middleware/upload');
+
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+// Convert an animated GIF buffer → WebM (VP9) buffer
+async function gifToWebm(buffer) {
+  const tmpIn  = path.join(os.tmpdir(), `gif-${Date.now()}-${Math.random().toString(36).slice(2)}.gif`);
+  const tmpOut = path.join(os.tmpdir(), `webm-${Date.now()}-${Math.random().toString(36).slice(2)}.webm`);
+  await fs.writeFile(tmpIn, buffer);
+  try {
+    await new Promise((resolve, reject) => {
+      ffmpeg(tmpIn)
+        .outputOptions([
+          '-c:v libvpx-vp9',
+          '-b:v 0',          // variable bitrate
+          '-crf 33',         // quality: 0=lossless, 63=worst; 33 is a good balance
+          '-auto-alt-ref 0', // required for single-pass streaming
+          '-an',             // no audio
+        ])
+        .output(tmpOut)
+        .on('end', resolve)
+        .on('error', reject)
+        .run();
+    });
+    return await fs.readFile(tmpOut);
+  } finally {
+    await fs.unlink(tmpIn).catch(() => {});
+    await fs.unlink(tmpOut).catch(() => {});
+  }
+}
 
 const router = express.Router();
 router.use(requireAuth);
@@ -53,8 +86,27 @@ function makeKey(sub, originalName) {
 router.post('/upload', upload.single('file'), checkSize, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-  const file = req.file;
+  let file = req.file;
   const sub  = req._uploadSubDir || 'misc';
+
+  // ── Convert animated GIFs to WebM (VP9) for dramatically smaller files ──────
+  if (file.mimetype === 'image/gif') {
+    try {
+      const webmBuffer = await gifToWebm(file.buffer);
+      const ratio = (webmBuffer.length / file.buffer.length * 100).toFixed(0);
+      console.log(`GIF→WebM: ${(file.buffer.length/1024).toFixed(0)}KB → ${(webmBuffer.length/1024).toFixed(0)}KB (${ratio}% of original)`);
+      file = {
+        ...file,
+        buffer:       webmBuffer,
+        size:         webmBuffer.length,
+        mimetype:     'video/webm',
+        originalname: file.originalname.replace(/\.gif$/i, '.webm'),
+      };
+    } catch (err) {
+      console.warn('GIF→WebM conversion failed, storing original GIF:', err.message);
+    }
+  }
+
   const storageKey = makeKey(sub, file.originalname);
 
   let width = null, height = null, thumbnailKey = null;

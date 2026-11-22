@@ -1702,6 +1702,10 @@ function ElementContent({ el, previewSrc }) {
   if (type === 'image' || type === 'gif') {
     const fit = p.fit || 'cover';
     const src = previewSrc || p.src;
+    const isVideo = src && /\.(webm|mp4)$/i.test(src);
+    if (src && isVideo) return (
+      <video src={src} style={{ width:'100%', height:'100%', objectFit: fit, display:'block' }} autoPlay loop muted playsInline />
+    );
     return src
       ? <img src={src} style={{ width:'100%', height:'100%', objectFit: fit, display:'block' }} alt={p.altText || ''} />
       : <div style={{ width:'100%', height:'100%', background:'linear-gradient(135deg,#065f46,#064e3b)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:6, color:'rgba(255,255,255,.5)', pointerEvents:'none' }}>

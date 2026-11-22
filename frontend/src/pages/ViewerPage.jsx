@@ -88,6 +88,9 @@ function ElementContent({ el }) {
 
   if (el.type === 'image' || el.type === 'gif') {
     if (!p.src) return null;
+    if (/\.(webm|mp4)$/i.test(p.src)) {
+      return <video src={p.src} style={{ width:'100%', height:'100%', objectFit: p.fit || 'cover', display:'block' }} autoPlay loop muted playsInline />;
+    }
     return <img src={p.src} style={{ width:'100%', height:'100%', objectFit: p.fit || 'cover', display:'block' }} alt={p.altText || ''} />;
   }
 
