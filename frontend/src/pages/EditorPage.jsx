@@ -1152,6 +1152,9 @@ async function movePage(pageId, direction) {
               }
               setEditingId(null);
             }}
+            onReorder={reorderedEls => {
+              if (activePage) updateElements(activePage.id, reorderedEls);
+            }}
           />
           {/* Scrollable props area */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -1837,8 +1840,95 @@ function PageContextMenu({ menu, onClose, onAction }) {
 // ── Layers panel ─────────────────────────────────────────────────────────────
 const TYPE_ICON = { bg:'🎨', image:'🖼', gif:'🎞', video:'🎬', text:'T', link:'🔗', audio:'🎵', sfx:'✨', curvetext:'∿', media:'🎬' };
 
-function LayersPanel({ elements, selectedIds, onSelect, onDeleteSelected }) {
-  // Render layers highest-first (visually on top → on bottom)
+function LayersPanel({ elements, selectedIds, onSelect, onDeleteSelected, onReorder }) {
+  const [dragId,   setDragId]   = useState(null);
+  const [dropInfo, setDropInfo] = useState(null); // { targetId, above }
+
+  // Build a flat ordered list: layer 5 at top → layer 1 at bottom.
+  // Within each layer, higher z_index → closer to top of that group.
+  const orderedEls = [...elements].sort((a, b) => {
+    const az = a.layer * 100 + (a.z_index || 0);
+    const bz = b.layer * 100 + (b.z_index || 0);
+    return bz - az; // descending = top of stack first
+  });
+
+  function elLabel(el) {
+    const p = el.props || {};
+    if (el.type === 'text')       return (p.content || 'Text box').slice(0, 26);
+    if (el.type === 'curvetext')  return (p.text || 'Curve Text').slice(0, 26);
+    if (el.type === 'link')       return p.label || p.url || 'Link';
+    if (el.type === 'bg')         return 'Background fill';
+    return (el.type.charAt(0).toUpperCase() + el.type.slice(1)) + (p.src ? '' : ' (empty)');
+  }
+
+  function handleDragStart(e, id) {
+    setDragId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function handleDragOver(e, targetId, domEl) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (targetId === dragId) { setDropInfo(null); return; }
+    const rect = domEl.getBoundingClientRect();
+    const above = e.clientY < rect.top + rect.height / 2;
+    setDropInfo({ targetId, above });
+  }
+
+  function handleDrop(e, targetId) {
+    e.preventDefault();
+    if (!dragId || !dropInfo || targetId === dragId) { setDragId(null); setDropInfo(null); return; }
+
+    // Build new order
+    const list = [...orderedEls];
+    const fromIdx = list.findIndex(el => el.id === dragId);
+    const toIdx   = list.findIndex(el => el.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) { setDragId(null); setDropInfo(null); return; }
+
+    const [moved] = list.splice(fromIdx, 1);
+    const insertAt = dropInfo.above ? list.findIndex(el => el.id === targetId) : list.findIndex(el => el.id === targetId) + 1;
+    list.splice(insertAt, 0, moved);
+
+    // Reassign layer and z_index based on new order.
+    // We preserve each element's layer unless it crossed a layer-group boundary.
+    // Strategy: determine target layer from surrounding elements.
+    const updated = elements.map(el => {
+      const newPos = list.findIndex(o => o.id === el.id);
+      if (newPos === -1) return el;
+      // Infer layer: use neighbour's layer if the element crossed into a new group.
+      // Simple approach: use moved element's target position to pick layer from neighbour.
+      if (el.id !== dragId) {
+        // Other elements keep their layer but get new z_index from new order within their layer.
+        return el;
+      }
+      // For the moved element, pick layer from the nearest neighbour in the new list position.
+      const above = list[newPos - 1];
+      const below = list[newPos + 1];
+      const newLayer = above ? above.layer : (below ? below.layer : el.layer);
+      return { ...el, layer: newLayer };
+    });
+
+    // Now reassign z_index within each layer based on order in the new list.
+    const layerCounts = {};
+    const finalEls = list.map(el => {
+      const e = updated.find(u => u.id === el.id) || el;
+      layerCounts[e.layer] = (layerCounts[e.layer] || 0);
+      const z = layerCounts[e.layer];
+      layerCounts[e.layer]++;
+      return { ...e, z_index: z };
+    });
+
+    // Reverse z_index within each layer so top of list = highest z_index
+    const layerMaxes = {};
+    finalEls.forEach(e => { layerMaxes[e.layer] = Math.max(layerMaxes[e.layer] || 0, e.z_index); });
+    const result = finalEls.map(e => ({ ...e, z_index: layerMaxes[e.layer] - e.z_index }));
+
+    onReorder(result);
+    setDragId(null);
+    setDropInfo(null);
+  }
+
+  // Group by layer for headers
   const layerOrder = [5, 4, 3, 2, 1];
 
   return (
@@ -1846,56 +1936,51 @@ function LayersPanel({ elements, selectedIds, onSelect, onDeleteSelected }) {
       <div style={{ padding: '8px 10px 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: .6, textTransform: 'uppercase', color: 'var(--muted)', flex: 1 }}>Layers</span>
         {selectedIds.size > 1 && (
-          <button
-            onClick={onDeleteSelected}
+          <button onClick={onDeleteSelected}
             style={{ fontSize: 9, padding: '2px 7px', background: 'rgba(239,68,68,.15)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 4, color: '#f87171', cursor: 'pointer', whiteSpace: 'nowrap' }}
           >🗑 Delete {selectedIds.size}</button>
         )}
       </div>
-      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+      <div style={{ maxHeight: 260, overflowY: 'auto' }}
+        onDragEnd={() => { setDragId(null); setDropInfo(null); }}
+      >
         {layerOrder.map(layer => {
-          const els = elements.filter(e => e.layer === layer);
+          const els = orderedEls.filter(e => e.layer === layer);
           if (!els.length) return null;
           return (
             <div key={layer}>
-              {/* Layer header */}
-              <div style={{
-                padding: '3px 10px', fontSize: 9, fontWeight: 700, letterSpacing: .5,
+              <div style={{ padding: '3px 10px', fontSize: 9, fontWeight: 700, letterSpacing: .5,
                 textTransform: 'uppercase', color: 'var(--muted)', background: 'var(--surface2)',
-                display: 'flex', alignItems: 'center', gap: 5,
-              }}>
+                display: 'flex', alignItems: 'center', gap: 5 }}>
                 <span style={{ opacity: .5 }}>#{layer}</span>
                 <span>{LAYER_NAMES[layer]}</span>
               </div>
-              {/* Elements in this layer */}
               {els.map(el => {
-                const p = el.props || {};
-                let label = '';
-                if (el.type === 'text')           label = (p.content || 'Text box').slice(0, 26);
-                else if (el.type === 'curvetext') label = (p.text || 'Curve Text').slice(0, 26);
-                else if (el.type === 'link')      label = p.label || p.url || 'Link';
-                else if (el.type === 'bg')        label = 'Background fill';
-                else label = (el.type.charAt(0).toUpperCase() + el.type.slice(1)) + (p.src ? '' : ' (empty)');
-
-                const isSel = selectedIds.has(el.id);
+                const isSel  = selectedIds.has(el.id);
+                const isDrag = el.id === dragId;
+                const dropAbove = dropInfo?.targetId === el.id && dropInfo.above;
+                const dropBelow = dropInfo?.targetId === el.id && !dropInfo.above;
                 return (
-                  <div
-                    key={el.id}
+                  <div key={el.id}
+                    draggable
+                    onDragStart={e => handleDragStart(e, el.id)}
+                    onDragOver={e => handleDragOver(e, el.id, e.currentTarget)}
+                    onDrop={e => handleDrop(e, el.id)}
                     onClick={e => onSelect(el.id, e.shiftKey)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 7,
                       padding: '5px 10px 5px 18px',
                       background: isSel ? 'rgba(99,102,241,.18)' : 'transparent',
                       borderLeft: `2px solid ${isSel ? 'var(--accent)' : 'transparent'}`,
-                      cursor: 'pointer', fontSize: 11,
+                      borderTop:    dropAbove ? '2px solid var(--accent)' : '2px solid transparent',
+                      borderBottom: dropBelow ? '2px solid var(--accent)' : '2px solid transparent',
+                      cursor: 'grab', fontSize: 11, opacity: isDrag ? 0.4 : 1,
                       color: isSel ? 'var(--text)' : 'var(--muted)',
-                      transition: 'background .1s',
                     }}
-                    onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,.04)'; }}
-                    onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
                   >
+                    <span style={{ fontSize: 10, opacity: .4, marginRight: -4 }}>⠿</span>
                     <span style={{ fontSize: 12, width: 16, textAlign: 'center', flexShrink: 0 }}>{TYPE_ICON[el.type] || '◻'}</span>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{elLabel(el)}</span>
                     {isSel && <span style={{ fontSize: 8, color: 'var(--accent)', fontWeight: 700 }}>●</span>}
                   </div>
                 );
@@ -2124,7 +2209,7 @@ function PropsPanel({ el, pageEls = [], onChange, onDelete, onDuplicate, onCopy,
 
       {/* Layer */}
       <Section title="Layer">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 11, color: 'var(--muted)', width: 48 }}>Layer</span>
           <select className="input input-sm" style={{ flex: 1 }} value={el.layer} onChange={e => onChange({ layer: parseInt(e.target.value), z_index: 0 })}>
             <option value={1}>1 — Background</option>
@@ -2133,50 +2218,6 @@ function PropsPanel({ el, pageEls = [], onChange, onDelete, onDuplicate, onCopy,
             <option value={4}>4 — Audio</option>
             <option value={5}>5 — Sound Effects</option>
           </select>
-        </div>
-        {/* Stacking order within all elements */}
-        <div style={{ display: 'flex', gap: 6 }}>
-          {(() => {
-            const allZ = pageEls.map(e => (e.layer * 100) + (e.z_index || 0));
-            const myZ  = (el.layer * 100) + (el.z_index || 0);
-            const maxZ = Math.max(...allZ);
-            const minZ = Math.min(...allZ);
-            const btnStyle = { flex: 1, fontSize: 11, padding: '4px 0', borderRadius: 6,
-              border: '1px solid var(--border)', background: 'var(--surface2)',
-              color: 'var(--fg)', cursor: 'pointer' };
-            return (<>
-              <button style={btnStyle} title="Move to very front (above everything)"
-                disabled={myZ >= maxZ}
-                onClick={() => onChange({ layer: 5, z_index: (pageEls.filter(e=>e.layer===5).reduce((m,e)=>Math.max(m,e.z_index||0),0))+1 })}>
-                ⤒ Front
-              </button>
-              <button style={btnStyle} title="Move forward one step"
-                disabled={myZ >= maxZ}
-                onClick={() => {
-                  const above = pageEls.filter(e => e.id !== el.id && (e.layer*100+(e.z_index||0)) > myZ);
-                  if (!above.length) return;
-                  const next = above.reduce((a,b) => (a.layer*100+(a.z_index||0)) < (b.layer*100+(b.z_index||0)) ? a : b);
-                  onChange({ layer: next.layer, z_index: (next.z_index||0)+1 });
-                }}>
-                ↑ Forward
-              </button>
-              <button style={btnStyle} title="Move backward one step"
-                disabled={myZ <= minZ}
-                onClick={() => {
-                  const below = pageEls.filter(e => e.id !== el.id && (e.layer*100+(e.z_index||0)) < myZ);
-                  if (!below.length) return;
-                  const prev = below.reduce((a,b) => (a.layer*100+(a.z_index||0)) > (b.layer*100+(b.z_index||0)) ? a : b);
-                  onChange({ layer: prev.layer, z_index: Math.max(0, (prev.z_index||0)-1) });
-                }}>
-                ↓ Back
-              </button>
-              <button style={btnStyle} title="Move to very back (behind everything)"
-                disabled={myZ <= minZ}
-                onClick={() => onChange({ layer: 1, z_index: 0 })}>
-                ⤓ Behind
-              </button>
-            </>);
-          })()}
         </div>
       </Section>
 
