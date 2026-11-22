@@ -1170,6 +1170,7 @@ async function movePage(pageId, direction) {
           ) : selectedEl ? (
             <PropsPanel
               el={selectedEl}
+              pageEls={pageEls}
               onChange={changes => updateEl(selectedEl.id, changes)}
               onDelete={() => deleteEl(selectedEl.id)}
               onDuplicate={() => duplicateEl(selectedEl.id)}
@@ -2044,7 +2045,7 @@ function CropModal({ src, isGif, onConfirm, onCancel }) {
 }
 
 // ── Props panel ───────────────────────────────────────────────────────────────
-function PropsPanel({ el, onChange, onDelete, onDuplicate, onCopy, showToast, onUpload, customFonts = [], onFontUpload }) {
+function PropsPanel({ el, pageEls = [], onChange, onDelete, onDuplicate, onCopy, showToast, onUpload, customFonts = [], onFontUpload }) {
   const typeNames = { bg:'Background', image:'Image', text:'Text', gif:'GIF', video:'Video', link:'Link', audio:'Audio', sfx:'Sound Effects', curvetext:'Curve Text', media:'Media' };
   const p = el.props || {};
   const [showCrop, setShowCrop] = useState(false);
@@ -2125,13 +2126,57 @@ function PropsPanel({ el, onChange, onDelete, onDuplicate, onCopy, showToast, on
       <Section title="Layer">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <span style={{ fontSize: 11, color: 'var(--muted)', width: 48 }}>Layer</span>
-          <select className="input input-sm" style={{ flex: 1 }} value={el.layer} onChange={e => onChange({ layer: parseInt(e.target.value) })}>
+          <select className="input input-sm" style={{ flex: 1 }} value={el.layer} onChange={e => onChange({ layer: parseInt(e.target.value), z_index: 0 })}>
             <option value={1}>1 — Background</option>
             <option value={2}>2 — Images</option>
             <option value={3}>3 — Text</option>
             <option value={4}>4 — Audio</option>
             <option value={5}>5 — Sound Effects</option>
           </select>
+        </div>
+        {/* Stacking order within all elements */}
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(() => {
+            const allZ = pageEls.map(e => (e.layer * 100) + (e.z_index || 0));
+            const myZ  = (el.layer * 100) + (el.z_index || 0);
+            const maxZ = Math.max(...allZ);
+            const minZ = Math.min(...allZ);
+            const btnStyle = { flex: 1, fontSize: 11, padding: '4px 0', borderRadius: 6,
+              border: '1px solid var(--border)', background: 'var(--surface2)',
+              color: 'var(--fg)', cursor: 'pointer' };
+            return (<>
+              <button style={btnStyle} title="Move to very front (above everything)"
+                disabled={myZ >= maxZ}
+                onClick={() => onChange({ layer: 5, z_index: (pageEls.filter(e=>e.layer===5).reduce((m,e)=>Math.max(m,e.z_index||0),0))+1 })}>
+                ⤒ Front
+              </button>
+              <button style={btnStyle} title="Move forward one step"
+                disabled={myZ >= maxZ}
+                onClick={() => {
+                  const above = pageEls.filter(e => e.id !== el.id && (e.layer*100+(e.z_index||0)) > myZ);
+                  if (!above.length) return;
+                  const next = above.reduce((a,b) => (a.layer*100+(a.z_index||0)) < (b.layer*100+(b.z_index||0)) ? a : b);
+                  onChange({ layer: next.layer, z_index: (next.z_index||0)+1 });
+                }}>
+                ↑ Forward
+              </button>
+              <button style={btnStyle} title="Move backward one step"
+                disabled={myZ <= minZ}
+                onClick={() => {
+                  const below = pageEls.filter(e => e.id !== el.id && (e.layer*100+(e.z_index||0)) < myZ);
+                  if (!below.length) return;
+                  const prev = below.reduce((a,b) => (a.layer*100+(a.z_index||0)) > (b.layer*100+(b.z_index||0)) ? a : b);
+                  onChange({ layer: prev.layer, z_index: Math.max(0, (prev.z_index||0)-1) });
+                }}>
+                ↓ Back
+              </button>
+              <button style={btnStyle} title="Move to very back (behind everything)"
+                disabled={myZ <= minZ}
+                onClick={() => onChange({ layer: 1, z_index: 0 })}>
+                ⤓ Behind
+              </button>
+            </>);
+          })()}
         </div>
       </Section>
 
