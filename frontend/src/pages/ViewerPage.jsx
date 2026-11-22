@@ -86,10 +86,14 @@ function ElementContent({ el }) {
     <div style={{ width:'100%', height:'100%', background: p.color || 'linear-gradient(135deg,#1e293b,#0f172a)' }} />
   );
 
-  if (el.type === 'image' || el.type === 'gif') {
+  if (el.type === 'image' || el.type === 'gif' || el.type === 'media') {
     if (!p.src) return null;
-    if (/\.(webm|mp4)$/i.test(p.src)) {
+    if (/\.(webm|mp4|mov|ogv)$/i.test(p.src)) {
       return <video src={p.src} style={{ width:'100%', height:'100%', objectFit: p.fit || 'cover', display:'block' }} autoPlay loop muted playsInline />;
+    }
+    if (/\.(mp3|aac|ogg|wav|m4a|flac)$/i.test(p.src)) {
+      return <audio src={p.src} autoPlay style={{ display: 'none' }}
+        ref={node => { if (node) node.volume = p.volume ?? 1.0; }} />;
     }
     return <img src={p.src} style={{ width:'100%', height:'100%', objectFit: p.fit || 'cover', display:'block' }} alt={p.altText || ''} />;
   }
