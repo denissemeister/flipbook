@@ -57,8 +57,8 @@ export default function RichTextEditor({ html, baseStyle = {}, onChange }) {
   const [showColorMenu, setShowColorMenu] = useState(false);
   const [customColor, setCustomColor] = useState('#634D96');
 
-  // --- sync external html into DOM (only on mount / when html changes externally)
-  const lastHtmlRef = useRef(html);
+  // --- sync external html into DOM (on mount and when html changes externally)
+  const lastHtmlRef = useRef(null); // null ensures first render always sets innerHTML
   useEffect(() => {
     if (!editorRef.current) return;
     // Only update DOM if the value genuinely changed from outside
