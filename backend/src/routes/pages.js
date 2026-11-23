@@ -212,6 +212,52 @@ router.patch('/books/:bookId/pages/:pageId/reorder', async (req, res) => {
   }
 });
 
+// ── POST /api/v1/books/:bookId/pages/reorder-batch ───────────────────────────
+// Accepts { order: [pageId, pageId, ...] } — the full desired order.
+// Renumbers all pages in one transaction.
+router.post('/books/:bookId/pages/reorder-batch', async (req, res) => {
+  const { order } = req.body;
+  if (!Array.isArray(order) || order.length === 0) {
+    return res.status(400).json({ error: 'order must be a non-empty array of page IDs' });
+  }
+  if (!await getBook(req.params.bookId, req.admin.id)) {
+    return res.status(404).json({ error: 'Book not found' });
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SET CONSTRAINTS pages_book_id_page_number_key DEFERRED');
+
+    // Temporarily move all pages to high numbers to avoid unique conflicts
+    await client.query(
+      `UPDATE pages SET page_number = page_number + 10000 WHERE book_id = $1`,
+      [req.params.bookId]
+    );
+
+    // Assign new page_numbers in order
+    for (let i = 0; i < order.length; i++) {
+      await client.query(
+        'UPDATE pages SET page_number = $1, updated_at = now() WHERE id = $2 AND book_id = $3',
+        [i + 1, order[i], req.params.bookId]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const { rows } = await client.query(
+      'SELECT * FROM pages WHERE book_id = $1 ORDER BY page_number',
+      [req.params.bookId]
+    );
+    res.json(rows);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
 // ── PATCH /api/v1/books/:bookId/pages/:pageId/read-aloud ──────────────────────
 // Save read-aloud text and/or audio URL for a single page.
 router.patch('/books/:bookId/pages/:pageId/read-aloud', async (req, res) => {

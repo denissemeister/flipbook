@@ -122,6 +122,8 @@ export default function EditorPage() {
   const [dragInfo, setDragInfo] = useState(null); // null | { elCX, elCY } (0–1 fractions)
   const [selectedPageIds, setSelectedPageIds] = useState(new Set()); // page multi-select
   const [pageContextMenu, setPageContextMenu] = useState(null);      // null | { x, y, pageIds }
+  const [pageDragIds, setPageDragIds]         = useState(null);       // null | Set of page IDs being dragged
+  const [pageDragOverIdx, setPageDragOverIdx] = useState(null);       // null | number — drop line position (index to insert before)
   const previewVideoTimer = useRef(null);
 
   const undoStack    = useRef([]); // [{ pageId, snapshot }]
@@ -588,6 +590,31 @@ async function movePage(pageId, direction) {
     await reloadPages(pageId);
   } catch (err) { showToast(err.message); }
 }
+  async function reorderPagesByDrag(draggedIds, insertBeforeIdx) {
+    // draggedIds: Set of page IDs being moved
+    // insertBeforeIdx: index in current `pages` array to insert before (after removing dragged pages)
+    const dragged = pages.filter(p => draggedIds.has(p.id));
+    const rest    = pages.filter(p => !draggedIds.has(p.id));
+    // Clamp insertBeforeIdx to rest length
+    const clampedIdx = Math.min(insertBeforeIdx, rest.length);
+    const newOrder = [
+      ...rest.slice(0, clampedIdx),
+      ...dragged,
+      ...rest.slice(clampedIdx),
+    ];
+    // Optimistic update
+    const renumbered = newOrder.map((p, i) => ({ ...p, page_number: i + 1 }));
+    setPages(renumbered);
+    try {
+      await api.post(`/books/${id}/pages/reorder-batch`, { order: newOrder.map(p => p.id) });
+    } catch (err) {
+      showToast('Reorder failed: ' + err.message);
+      // Revert by reloading
+      const bookData = await api.get(`/books/${id}`);
+      setPages(bookData.pages || []);
+    }
+  }
+
   async function deletePages(pageIds) {
     if (pages.length <= pageIds.length) { showToast('Cannot delete all pages'); return; }
     const label = pageIds.length > 1 ? `${pageIds.length} pages` : 'page';
@@ -914,60 +941,119 @@ async function movePage(pageId, direction) {
             )}
           </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: '6px 6px' }}>
-            {pages.map(page => {
-              const isActive = activePage?.id === page.id;
-              const isSel   = selectedPageIds.has(page.id);
+          <div
+            style={{ flex: 1, overflowY: 'auto', padding: '6px 6px' }}
+            onDragOver={e => {
+              e.preventDefault();
+              // Determine drop index from mouse Y relative to list items
+              const listEl = e.currentTarget;
+              const items  = [...listEl.querySelectorAll('[data-page-id]')];
+              let dropIdx  = items.length;
+              for (let i = 0; i < items.length; i++) {
+                const rect = items[i].getBoundingClientRect();
+                if (e.clientY < rect.top + rect.height / 2) { dropIdx = i; break; }
+              }
+              setPageDragOverIdx(dropIdx);
+            }}
+            onDragLeave={e => {
+              if (!e.currentTarget.contains(e.relatedTarget)) setPageDragOverIdx(null);
+            }}
+            onDrop={e => {
+              e.preventDefault();
+              const draggedIds = pageDragIds;
+              const dropIdx    = pageDragOverIdx;
+              setPageDragIds(null);
+              setPageDragOverIdx(null);
+              if (draggedIds && dropIdx !== null) {
+                // Compute the adjusted insert index after removing dragged pages
+                const restPages = pages.filter(p => !draggedIds.has(p.id));
+                const listEl    = e.currentTarget;
+                const items     = [...listEl.querySelectorAll('[data-page-id]')];
+                // Map dropIdx (into full pages array) → index into restPages
+                const nonDraggedIds = restPages.map(p => p.id);
+                let restInsertIdx   = 0;
+                let seen = 0;
+                for (let i = 0; i < pages.length && seen < dropIdx; i++) {
+                  if (!draggedIds.has(pages[i].id)) { restInsertIdx = seen + 1; }
+                  if (!draggedIds.has(pages[i].id)) seen++;
+                }
+                // Simpler: count non-dragged pages before dropIdx in original pages array
+                restInsertIdx = pages.slice(0, dropIdx).filter(p => !draggedIds.has(p.id)).length;
+                reorderPagesByDrag(draggedIds, restInsertIdx);
+              }
+            }}
+          >
+            {pages.map((page, idx) => {
+              const isActive  = activePage?.id === page.id;
+              const isSel     = selectedPageIds.has(page.id);
+              const isDragged = pageDragIds?.has(page.id);
+              const showDropLine = pageDragOverIdx === idx && pageDragIds && !isDragged;
               return (
-                <div
-                  key={page.id}
-                  data-page-id={page.id}
-                  onClick={e => {
-                    if (e.metaKey || e.ctrlKey) {
-                      setSelectedPageIds(prev => {
-                        const n = new Set(prev);
-                        if (n.has(page.id)) n.delete(page.id); else n.add(page.id);
-                        return n;
-                      });
-                    } else if (e.shiftKey && selectedPageIds.size > 0) {
-                      const lastId  = [...selectedPageIds].at(-1);
-                      const lastIdx = pages.findIndex(p => p.id === lastId);
-                      const thisIdx = pages.findIndex(p => p.id === page.id);
-                      const [from, to] = [Math.min(lastIdx, thisIdx), Math.max(lastIdx, thisIdx)];
-                      setSelectedPageIds(new Set(pages.slice(from, to + 1).map(p => p.id)));
-                    } else {
-                      setActivePage(page);
-                      setSelectedIds(new Set());
-                      setEditingId(null);
-                      setSelectedPageIds(new Set([page.id]));
-                    }
-                  }}
-                  onContextMenu={e => {
-                    e.preventDefault();
-                    const ids = selectedPageIds.has(page.id) ? [...selectedPageIds] : [page.id];
-                    if (!selectedPageIds.has(page.id)) setSelectedPageIds(new Set([page.id]));
-                    setPageContextMenu({ x: e.clientX, y: e.clientY, pageIds: ids });
-                  }}
-                  style={{
-                    borderRadius: 6,
-                    border: `2px solid ${isActive ? 'var(--accent)' : isSel ? 'rgba(99,102,241,.55)' : 'transparent'}`,
-                    background: isSel && !isActive ? 'rgba(99,102,241,.08)' : 'transparent',
-                    cursor: 'pointer', marginBottom: 5, overflow: 'hidden', transition: 'border-color .12s',
-                    position: 'relative',
-                  }}
-                  onMouseEnter={e => { if (!isActive && !isSel) e.currentTarget.style.borderColor = 'rgba(99,102,241,.3)'; }}
-                  onMouseLeave={e => { if (!isActive && !isSel) e.currentTarget.style.borderColor = 'transparent'; }}
-                >
-                  <div style={{ aspectRatio: `${fmt.w}/${fmt.h}`, background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: 'var(--border)', position: 'relative' }}>
-                    ◈
-                    <span style={{ position: 'absolute', bottom: 3, left: 5, fontSize: 9, fontWeight: 700, color: 'var(--muted)' }}>{page.page_number}</span>
-                    {isSel && !isActive && (
-                      <span style={{ position: 'absolute', top: 2, right: 2, width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)' }} />
-                    )}
+                <div key={page.id} style={{ position: 'relative' }}>
+                  {showDropLine && (
+                    <div style={{ height: 2, background: 'var(--accent)', borderRadius: 2, margin: '0 2px 3px', boxShadow: '0 0 4px var(--accent)' }} />
+                  )}
+                  <div
+                    data-page-id={page.id}
+                    draggable
+                    onDragStart={e => {
+                      const ids = selectedPageIds.has(page.id) ? new Set(selectedPageIds) : new Set([page.id]);
+                      setPageDragIds(ids);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragEnd={() => { setPageDragIds(null); setPageDragOverIdx(null); }}
+                    onClick={e => {
+                      if (e.metaKey || e.ctrlKey) {
+                        setSelectedPageIds(prev => {
+                          const n = new Set(prev);
+                          if (n.has(page.id)) n.delete(page.id); else n.add(page.id);
+                          return n;
+                        });
+                      } else if (e.shiftKey && selectedPageIds.size > 0) {
+                        const lastId  = [...selectedPageIds].at(-1);
+                        const lastIdx = pages.findIndex(p => p.id === lastId);
+                        const thisIdx = pages.findIndex(p => p.id === page.id);
+                        const [from, to] = [Math.min(lastIdx, thisIdx), Math.max(lastIdx, thisIdx)];
+                        setSelectedPageIds(new Set(pages.slice(from, to + 1).map(p => p.id)));
+                      } else {
+                        setActivePage(page);
+                        setSelectedIds(new Set());
+                        setEditingId(null);
+                        setSelectedPageIds(new Set([page.id]));
+                      }
+                    }}
+                    onContextMenu={e => {
+                      e.preventDefault();
+                      const ids = selectedPageIds.has(page.id) ? [...selectedPageIds] : [page.id];
+                      if (!selectedPageIds.has(page.id)) setSelectedPageIds(new Set([page.id]));
+                      setPageContextMenu({ x: e.clientX, y: e.clientY, pageIds: ids });
+                    }}
+                    style={{
+                      borderRadius: 6,
+                      border: `2px solid ${isActive ? 'var(--accent)' : isSel ? 'rgba(99,102,241,.55)' : 'transparent'}`,
+                      background: isSel && !isActive ? 'rgba(99,102,241,.08)' : 'transparent',
+                      cursor: 'grab', marginBottom: 5, overflow: 'hidden', transition: 'border-color .12s, opacity .12s',
+                      position: 'relative',
+                      opacity: isDragged ? 0.4 : 1,
+                    }}
+                    onMouseEnter={e => { if (!isActive && !isSel) e.currentTarget.style.borderColor = 'rgba(99,102,241,.3)'; }}
+                    onMouseLeave={e => { if (!isActive && !isSel) e.currentTarget.style.borderColor = 'transparent'; }}
+                  >
+                    <div style={{ aspectRatio: `${fmt.w}/${fmt.h}`, background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: 'var(--border)', position: 'relative' }}>
+                      ◈
+                      <span style={{ position: 'absolute', bottom: 3, left: 5, fontSize: 9, fontWeight: 700, color: 'var(--muted)' }}>{page.page_number}</span>
+                      {isSel && !isActive && (
+                        <span style={{ position: 'absolute', top: 2, right: 2, width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)' }} />
+                      )}
+                    </div>
                   </div>
                 </div>
               );
             })}
+            {/* Drop line at the end of the list */}
+            {pageDragOverIdx === pages.length && pageDragIds && (
+              <div style={{ height: 2, background: 'var(--accent)', borderRadius: 2, margin: '0 2px', boxShadow: '0 0 4px var(--accent)' }} />
+            )}
           </div>
 
           {selectedPageIds.size > 1 && (
