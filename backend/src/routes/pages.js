@@ -227,9 +227,9 @@ router.post('/books/:bookId/pages/reorder-batch', async (req, res) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    await client.query('SET CONSTRAINTS pages_book_id_page_number_key DEFERRED');
+    await client.query('SET CONSTRAINTS pages_book_id_page_number_key, pages_page_number_check DEFERRED');
 
-    // Temporarily move all pages to high numbers to avoid unique conflicts
+    // Temporarily move all pages to high numbers to avoid unique conflicts during renumbering
     await client.query(
       `UPDATE pages SET page_number = page_number + 10000 WHERE book_id = $1`,
       [req.params.bookId]
