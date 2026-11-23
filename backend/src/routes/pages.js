@@ -227,15 +227,12 @@ router.post('/books/:bookId/pages/reorder-batch', async (req, res) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    await client.query('SET CONSTRAINTS pages_book_id_page_number_key, pages_page_number_check DEFERRED');
+    // The unique constraint on (book_id, page_number) is DEFERRABLE (migration 013),
+    // so duplicates are only checked at COMMIT — by then all numbers are correct.
+    // No need to use an out-of-range offset; just assign directly.
+    await client.query('SET CONSTRAINTS pages_book_id_page_number_key DEFERRED');
 
-    // Temporarily move all pages to high numbers to avoid unique conflicts during renumbering
-    await client.query(
-      `UPDATE pages SET page_number = page_number + 10000 WHERE book_id = $1`,
-      [req.params.bookId]
-    );
-
-    // Assign new page_numbers in order
+    // Assign new page_numbers in desired order
     for (let i = 0; i < order.length; i++) {
       await client.query(
         'UPDATE pages SET page_number = $1, updated_at = now() WHERE id = $2 AND book_id = $3',
