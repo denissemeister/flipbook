@@ -1488,16 +1488,19 @@ function CanvasElement({ el, selected, isEditing, onSelect, onStartEdit, onStopE
     const file = e.target.files[0];
     if (!file) return;
     e.target.value = '';
-    // Show preview locally via state — do NOT call onChange until we have the real URL
     const blobUrl = URL.createObjectURL(file);
     setPreviewSrc(blobUrl);
+    const isGif = file.type === 'image/gif' || file.name.toLowerCase().endsWith('.gif');
     if (onToast) onToast('Uploading ' + file.name + '…');
+    const optimizeTimer = isGif ? setTimeout(() => { if (onToast) onToast('⚙ Optimizing file…'); }, 3000) : null;
     try {
       const url = await onUpload(file);
+      clearTimeout(optimizeTimer);
       setPreviewSrc(null);
       onChange({ props: { ...(el.props || {}), src: url, fileName: file.name } });
       if (onToast) onToast('✓ ' + file.name + ' saved');
     } catch (err) {
+      clearTimeout(optimizeTimer);
       setPreviewSrc(null);
       if (onToast) onToast('Upload failed: ' + (err.message || 'Unknown error'));
     }
@@ -2142,16 +2145,19 @@ function PropsPanel({ el, pageEls = [], onChange, onDelete, onDuplicate, onCopy,
     const file = e.target.files[0];
     if (!file) return;
     e.target.value = '';
-    // Show preview locally — do NOT call onChange until we have the real URL
     const blobUrl = URL.createObjectURL(file);
     setUploadingPreview(blobUrl);
+    const isGif = file.type === 'image/gif' || file.name.toLowerCase().endsWith('.gif');
     showToast('Uploading ' + file.name + '…');
+    const optimizeTimer = isGif ? setTimeout(() => showToast('⚙ Optimizing file…'), 3000) : null;
     try {
       const url = await onUpload(file);
+      clearTimeout(optimizeTimer);
       setUploadingPreview(null);
       onChange({ props: { ...p, src: url, fileName: file.name, fit: p.fit || 'cover' } });
       showToast('✓ ' + file.name + ' saved');
     } catch (err) {
+      clearTimeout(optimizeTimer);
       setUploadingPreview(null);
       showToast('Upload failed: ' + (err.message || 'Unknown error'));
     }
