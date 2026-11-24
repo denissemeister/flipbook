@@ -2422,7 +2422,8 @@ function PropsPanel({ el, pageEls = [], onChange, onDelete, onDuplicate, onCopy,
       {el.type === 'text' && (
         <Section title="Text">
           <textarea className="input" rows={4} style={{ resize:'vertical', marginBottom:8 }}
-            value={p.content||''} onChange={e => setProp('content', e.target.value)}
+            value={p.richText ? p.richText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : (p.content||'')}
+            onChange={e => onChange({ props: { ...p, content: e.target.value, richText: null } })}
             placeholder="Type your text…"
           />
           <div style={{ display:'flex', gap:6, marginBottom:8 }}>
